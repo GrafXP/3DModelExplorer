@@ -24,6 +24,7 @@ ModelExplorer.sln
 | Package | Version | Why |
 |---|---|---|
 | `HelixToolkit.Wpf.SharpDX` | 3.1.2 | DX11 viewport. Ships `net8.0-windows7.0` — loads fine on `net10.0-windows`. |
+| `MaterialDesignThemes` + `MaterialDesignColors` | 5.3.2 | Dark theme and control set. Already proven on `net10.0-windows` in the adjacent `TradingAgent` project. |
 | `Microsoft.Data.Sqlite` | 10.0.10 | Index persistence. Bundled `e_sqlite3` has FTS5 + trigram. |
 | `CommunityToolkit.Mvvm` | 8.4.2 | Source-generated observables/commands. Already a Helix transitive dep. |
 | `VirtualizingWrapPanel` | 2.5.4 | Virtualized thumbnail grid with container recycling. |
@@ -65,7 +66,7 @@ Each step ends at a gate you test by hand. Nothing proceeds until the gate passe
 
 ### Step 0 — Skeleton and dark shell
 
-Solution and four projects. Dark theme via WPF's built-in Fluent theme (`ThemeMode="Dark"`, `<NoWarn>WPF0001</NoWarn>` for the experimental diagnostic) plus an app-level brush dictionary. Three-pane layout: roots sidebar, results area, viewer — with draggable splitters and a status bar. No functionality behind it.
+Solution and four projects. Dark theme via `MaterialDesignThemes` (`BundledTheme BaseTheme="Dark"` + `MaterialDesign3.Defaults.xaml`), matching the setup already running on .NET 10 in the adjacent `TradingAgent` project, plus an app-level brush dictionary for surfaces the Material palette doesn't cover. Dark title bar via `DwmSetWindowAttribute`, applied in `OnSourceInitialized` so there's no light-to-dark flash. Three-pane layout: roots sidebar, results area, viewer — with draggable splitters and a status bar. No functionality behind it.
 
 > **Gate:** `dotnet run` opens a dark window. Title bar is dark, no white flash on startup, splitters drag, layout survives resize and a DPI change (drag to a second monitor).
 
@@ -124,7 +125,7 @@ Settings (roots, thumbnail size, cache location), keyboard shortcuts, remembered
 | Risk | Mitigation |
 |---|---|
 | SharpDX 4.2 (unmaintained) on .NET 10 | Proven in step 1, before anything depends on it. Fallback: `HelixToolkit.Wpf` Viewport3D at reduced perf. |
-| Fluent `ThemeMode` is still experimental | Isolated behind one resource dictionary; swapping to a hand-written dark theme is a contained change. |
+| Theme library lock-in | Custom surface brushes are declared in `App.xaml` separately from the Material palette, so restyling doesn't mean touching every view. |
 | No GPU / RDP session | DX11 WARP fallback — verify during step 1. |
 | Network share latency | Separate pipeline and DOP per root; all I/O off the UI thread. |
 | Thumbnail worker contending with the viewer for the GPU | Single render thread, throttled, yields while the user is interacting. |

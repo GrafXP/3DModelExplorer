@@ -1,0 +1,20 @@
+<Project>
+
+  <!-- Shared settings for every project in the solution. -->
+  <PropertyGroup>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+
+    <!-- x64 only: the DX11 viewport and multi-million-triangle meshes need
+         the larger address space. Left as AnyCPU in the .sln so configuration
+         management stays simple; this forces the emitted binaries to x64. -->
+    <PlatformTarget>x64</PlatformTarget>
+
+    <Product>3D Model Explorer</Product>
+    <Company>GrafXP</Company>
+    <Version>0.1.0</Version>
+    <NeutralLanguage>en</NeutralLanguage>
+  </PropertyGroup>
+
+</Project>

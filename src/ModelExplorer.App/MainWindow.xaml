@@ -1,0 +1,140 @@
+<Window x:Class="ModelExplorer.App.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:materialDesign="http://materialdesigninxaml.net/winfx/xaml/themes"
+        Title="3D Model Explorer"
+        Height="820" Width="1400"
+        MinHeight="520" MinWidth="900"
+        WindowStartupLocation="CenterScreen"
+        Background="{DynamicResource MaterialDesignPaper}"
+        TextElement.Foreground="{DynamicResource MaterialDesignBody}"
+        TextElement.FontWeight="Regular"
+        TextElement.FontSize="13"
+        TextOptions.TextFormattingMode="Ideal"
+        TextOptions.TextRenderingMode="Auto"
+        FontFamily="{DynamicResource MaterialDesignFont}">
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <!-- ══ Header ══════════════════════════════════════════════════ -->
+        <Border Grid.Row="0"
+                Background="{StaticResource ChromeBackgroundBrush}"
+                BorderBrush="{StaticResource PanelBorderBrush}"
+                BorderThickness="0,0,0,1">
+            <Grid Margin="12,8">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
+                    <materialDesign:PackIcon Kind="Cube"
+                                             Width="22" Height="22"
+                                             VerticalAlignment="Center"
+                                             Foreground="{DynamicResource PrimaryHueMidBrush}" />
+                    <TextBlock Text="3D Model Explorer"
+                               FontSize="15" FontWeight="SemiBold"
+                               Margin="8,0,0,0" VerticalAlignment="Center" />
+                </StackPanel>
+
+                <!-- Search box. Inert in Step 0 — wired up in Step 4. -->
+                <TextBox Grid.Column="1"
+                         x:Name="SearchBox"
+                         Margin="24,0"
+                         MaxWidth="520"
+                         HorizontalAlignment="Stretch"
+                         VerticalAlignment="Center"
+                         IsEnabled="False"
+                         Style="{StaticResource MaterialDesignOutlinedTextBox}"
+                         materialDesign:HintAssist.Hint="Search models…"
+                         materialDesign:TextFieldAssist.HasClearButton="True" />
+
+                <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                    <Button Style="{StaticResource MaterialDesignFlatButton}"
+                            IsEnabled="False" ToolTip="Add library folder (Step 3)">
+                        <StackPanel Orientation="Horizontal">
+                            <materialDesign:PackIcon Kind="FolderPlusOutline" VerticalAlignment="Center" />
+                            <TextBlock Text="Add Folder" Margin="6,0,0,0" VerticalAlignment="Center" />
+                        </StackPanel>
+                    </Button>
+                    <Button Style="{StaticResource MaterialDesignFlatButton}"
+                            IsEnabled="False" ToolTip="Settings (Step 8)">
+                        <materialDesign:PackIcon Kind="CogOutline" />
+                    </Button>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <!-- ══ Three-pane body ═════════════════════════════════════════ -->
+        <Grid Grid.Row="1">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition x:Name="RootsColumn" Width="240" MinWidth="160" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition x:Name="ResultsColumn" Width="360" MinWidth="220" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition x:Name="ViewerColumn" Width="*" MinWidth="320" />
+            </Grid.ColumnDefinitions>
+
+            <!-- Library roots -->
+            <Border Grid.Column="0" Background="{StaticResource PanelBackgroundBrush}">
+                <DockPanel>
+                    <TextBlock DockPanel.Dock="Top" Text="LIBRARY" Style="{StaticResource PanelHeaderStyle}" />
+                    <TextBlock Style="{StaticResource PlaceholderStyle}" Margin="16"
+                               Text="No library folders yet.&#x0a;&#x0a;Added in Step 3." />
+                </DockPanel>
+            </Border>
+
+            <GridSplitter Grid.Column="1" Style="{StaticResource PaneSplitterStyle}" />
+
+            <!-- Results -->
+            <Border Grid.Column="2"
+                    Background="{DynamicResource MaterialDesignPaper}"
+                    BorderBrush="{StaticResource PanelBorderBrush}"
+                    BorderThickness="1,0">
+                <DockPanel>
+                    <TextBlock DockPanel.Dock="Top" Text="MODELS" Style="{StaticResource PanelHeaderStyle}" />
+                    <TextBlock Style="{StaticResource PlaceholderStyle}" Margin="16"
+                               Text="Nothing indexed.&#x0a;&#x0a;List arrives in Step 3,&#x0a;thumbnail grid in Step 6." />
+                </DockPanel>
+            </Border>
+
+            <GridSplitter Grid.Column="3" Style="{StaticResource PaneSplitterStyle}" />
+
+            <!-- Viewer -->
+            <Border Grid.Column="4" Background="{StaticResource ViewportBackgroundBrush}">
+                <Grid>
+                    <TextBlock Style="{StaticResource PlaceholderStyle}"
+                               Text="3D viewport&#x0a;&#x0a;HelixToolkit DX11 surface mounts here in Step 1." />
+                </Grid>
+            </Border>
+        </Grid>
+
+        <!-- ══ Status bar ══════════════════════════════════════════════ -->
+        <Border Grid.Row="2"
+                Background="{StaticResource ChromeBackgroundBrush}"
+                BorderBrush="{StaticResource PanelBorderBrush}"
+                BorderThickness="0,1,0,0">
+            <Grid Margin="12,5">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <TextBlock Grid.Column="0" Text="Ready" Style="{StaticResource StatusTextStyle}" />
+
+                <TextBlock Grid.Column="2" Style="{StaticResource StatusTextStyle}">
+                    <Run Text="0 models indexed" />
+                    <Run Text="  ·  " Foreground="{StaticResource PanelBorderBrush}" />
+                    <Run x:Name="RendererStatusRun" Text="renderer: not initialised" />
+                </TextBlock>
+            </Grid>
+        </Border>
+    </Grid>
+</Window>

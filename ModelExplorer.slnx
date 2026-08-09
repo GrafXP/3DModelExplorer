@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/ModelExplorer.App/ModelExplorer.App.csproj" />
+    <Project Path="src/ModelExplorer.Geometry/ModelExplorer.Geometry.csproj" />
+    <Project Path="src/ModelExplorer.Indexing/ModelExplorer.Indexing.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/ModelExplorer.Tests/ModelExplorer.Tests.csproj" />
+  </Folder>
+</Solution>
