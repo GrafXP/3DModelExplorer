@@ -1,5 +1,8 @@
 # 3D Model Explorer — MVP Implementation Plan
 
+> Historical implementation plan. For current installation, features, controls,
+> and contribution guidance, start with [README.md](README.md).
+
 A fast WPF viewer + indexer for 3D printing models.
 
 **Target:** .NET 10 (SDK 10.0.203 / WindowsDesktop 10.0.7 confirmed installed), WPF, dark theme, x64.
@@ -191,6 +194,6 @@ Settings (roots, thumbnail size, cache location), keyboard shortcuts, remembered
 
 STEP support (`Ab4d.OpenCascade` for OCCT tessellation — needs ~200 MB of native OCCT binaries and a license file, which is exactly why it's not in the MVP), tags and collections, duplicate detection via content hash, measurement tools, cross-section, print-time estimate, G-code preview, OBJ/PLY.
 
-## Setup note
+## Release documentation
 
-The directory is not a git repo yet — worth `git init` before step 0 so each gate is a commit you can fall back to.
+The public release workflow is documented in [docs/RELEASING.md](docs/RELEASING.md).

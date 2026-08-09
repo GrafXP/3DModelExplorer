@@ -1,0 +1,60 @@
+name: Bug report
+description: Report reproducible incorrect behavior or a crash
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: Do not report security vulnerabilities here. Follow SECURITY.md instead.
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      placeholder: 1.0.0
+    validations:
+      required: true
+  - type: input
+    id: windows
+    attributes:
+      label: Windows version
+      placeholder: Windows 11 24H2
+    validations:
+      required: true
+  - type: dropdown
+    id: format
+    attributes:
+      label: Model format involved
+      options:
+        - STL
+        - 3MF
+        - Not model-specific
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: Include the expected result and the actual result.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction steps
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Screenshots, model size, triangle count, GPU, and whether the file can be shared all help.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Submission checks
+      options:
+        - label: I searched existing issues for this problem.
+          required: true
+        - label: This report does not contain confidential model files or sensitive paths.
+          required: true
