@@ -1,0 +1,45 @@
+# Normalize line endings on commit; check out native to the platform.
+* text=auto
+
+# Source
+*.cs        text diff=csharp
+*.xaml      text
+*.axaml     text
+*.md        text diff=markdown
+*.json      text
+*.xml       text
+*.yml       text
+*.yaml      text
+*.props     text
+*.targets   text
+*.hlsl      text
+*.fx        text
+
+# Visual Studio expects CRLF in these
+*.sln       text eol=crlf
+*.csproj    text eol=crlf
+*.vcxproj   text eol=crlf
+*.filters   text eol=crlf
+*.cmd       text eol=crlf
+*.bat       text eol=crlf
+
+# Shell scripts must stay LF even on Windows
+*.sh        text eol=lf
+
+# Binary — never diff, never munge
+*.stl       binary
+*.3mf       binary
+*.step      binary
+*.stp       binary
+*.obj       binary
+*.ply       binary
+*.png       binary
+*.jpg       binary
+*.ico       binary
+*.dll       binary
+*.exe       binary
+*.pdb       binary
+*.snk       binary
+*.pfx       binary
+*.db        binary
+*.zip       binary

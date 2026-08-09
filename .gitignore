@@ -1,0 +1,135 @@
+## ── Build output ────────────────────────────────────────────────
+[Bb]in/
+[Oo]bj/
+[Ll]og/
+[Ll]ogs/
+artifacts/
+[Dd]ebug/
+[Dd]ebugPublic/
+[Rr]elease/
+[Rr]eleases/
+x64/
+x86/
+[Ww][Ii][Nn]32/
+[Aa][Rr][Mm]/
+[Aa][Rr][Mm]64/
+bld/
+[Oo]ut/
+[Ll]og/
+msbuild.log
+msbuild.err
+msbuild.wrn
+
+## ── Visual Studio / Rider / VS Code ─────────────────────────────
+.vs/
+.vscode/
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+.idea/
+*.sln.docstates
+*.suo
+*.user
+*.userosscache
+*.userprefs
+*.dbmdl
+*.jfm
+*.svclog
+*.psess
+*.vsp
+*.vspx
+*.sap
+*.VisualState.xml
+
+## ── NuGet ───────────────────────────────────────────────────────
+*.nupkg
+*.snupkg
+**/[Pp]ackages/*
+!**/[Pp]ackages/build/
+*.nuget.props
+*.nuget.targets
+project.lock.json
+project.fragment.lock.json
+
+## ── Publish / deploy ────────────────────────────────────────────
+publish/
+[Pp]ublish[Pp]rofiles/*.pubxml.user
+*.[Pp]ublish.xml
+*.azurePubxml
+*.pubxml.user
+PublishScripts/
+*.appx
+*.appxbundle
+*.msix
+*.msixbundle
+*.appxupload
+
+## ── Test / coverage ─────────────────────────────────────────────
+[Tt]est[Rr]esult*/
+[Bb]uild[Ll]og.*
+TestResults/
+*.coverage
+*.coveragexml
+*.trx
+coverage*.json
+coverage*.xml
+coverage*.info
+BenchmarkDotNet.Artifacts/
+
+## ── Profiling / crash dumps ─────────────────────────────────────
+*.dmp
+*.mdmp
+*.hdmp
+*.etl
+*.diagsession
+*.nvuser
+PerfView*
+
+## ── ReSharper / JetBrains ───────────────────────────────────────
+_ReSharper*/
+*.[Rr]e[Ss]harper
+*.DotSettings.user
+
+## ── Local secrets & machine-specific config ─────────────────────
+*.local.json
+appsettings.*.Local.json
+secrets.json
+*.pfx
+*.snk
+
+## ── ModelExplorer runtime data ──────────────────────────────────
+# The model index and thumbnail cache live in %LocalAppData%, but keep
+# stray local copies and any scratch scan output out of the repo.
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+[Cc]ache/
+[Tt]humbs/
+[Ss]cratch/
+
+## ── Sample 3D models ────────────────────────────────────────────
+# Test models are large binaries — keep them out of history.
+# Point tests at a local folder via an env var instead.
+[Ss]amples/
+[Tt]est[Mm]odels/
+*.stl
+*.3mf
+*.step
+*.stp
+*.obj
+*.ply
+# ...except small hand-checked parser fixtures, which must be versioned.
+!tests/**/[Ff]ixtures/
+!tests/**/[Ff]ixtures/**
+
+## ── OS cruft ────────────────────────────────────────────────────
+[Tt]humbs.db
+[Tt]humbs.db:encryptable
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*.lnk
+.DS_Store
