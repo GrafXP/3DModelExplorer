@@ -1,4 +1,5 @@
 using ModelExplorer.Geometry.Stl;
+using ModelExplorer.Geometry.ThreeMf;
 
 namespace ModelExplorer.Geometry;
 
@@ -19,8 +20,8 @@ public sealed class GeometryLoaderRegistry
             .Order()];
     }
 
-    /// <summary>The registry the app runs with. 3MF joins in Step 2.</summary>
-    public static GeometryLoaderRegistry CreateDefault() => new([new StlLoader()]);
+    /// <summary>The registry the app runs with.</summary>
+    public static GeometryLoaderRegistry CreateDefault() => new([new StlLoader(), new ThreeMfLoader()]);
 
     public IReadOnlyList<string> SupportedExtensions { get; }
 
