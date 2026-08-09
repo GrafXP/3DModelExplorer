@@ -1,9 +1,9 @@
+using System.ComponentModel;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Interop;
-using System.Windows.Media.Media3D;
 using HelixToolkit.Wpf.SharpDX;
 using ModelExplorer.App.ViewModels;
 
@@ -30,6 +30,42 @@ public partial class MainWindow : Window
         // Clip planes track the camera, so they have to be recomputed on every
         // camera change rather than only when a model is loaded.
         Viewport.CameraChanged += (_, _) => ViewModel?.UpdateClipPlanes();
+
+        if (ViewModel is { } viewModel)
+        {
+            viewModel.PropertyChanged += OnViewModelPropertyChanged;
+        }
+    }
+
+    private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(MainViewModel.PivotPoint))
+        {
+            SyncRotationPoint();
+        }
+    }
+
+    /// <summary>
+    /// Mirrors the view model's pivot onto the camera controller.
+    /// </summary>
+    /// <remarks>
+    /// The fixed rotation point lives on the viewport, not in the view model, and
+    /// nothing clears it on its own. Left alone it survives into the next model —
+    /// so loading a new one would orbit it around a point picked off the previous
+    /// one, which is usually not even inside the new geometry. Driving it from a
+    /// single view-model property means every reset path covers it.
+    /// </remarks>
+    private void SyncRotationPoint()
+    {
+        if (ViewModel?.PivotPoint is { } point)
+        {
+            Viewport.FixedRotationPoint = point;
+            Viewport.FixedRotationPointEnabled = true;
+        }
+        else
+        {
+            Viewport.FixedRotationPointEnabled = false;
+        }
     }
 
     private async void OnWindowLoaded(object sender, RoutedEventArgs e)
@@ -80,18 +116,18 @@ public partial class MainWindow : Window
             .OrderBy(h => h.Distance)
             .FirstOrDefault();
 
+        // Only the view model is touched; SyncRotationPoint carries the change
+        // through to the viewport.
         if (nearest is null)
         {
-            Viewport.FixedRotationPointEnabled = false;
             viewModel.ClearPivot();
-            e.Handled = true;
-            return;
+        }
+        else
+        {
+            var p = nearest.PointHit;
+            viewModel.SetPivot(p.X, p.Y, p.Z);
         }
 
-        var p = nearest.PointHit;
-        Viewport.FixedRotationPoint = new Point3D(p.X, p.Y, p.Z);
-        Viewport.FixedRotationPointEnabled = true;
-        viewModel.SetPivot(p.X, p.Y, p.Z);
         e.Handled = true;
     }
 

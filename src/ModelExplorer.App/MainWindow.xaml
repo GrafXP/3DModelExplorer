@@ -105,6 +105,14 @@
                         <TextBlock Text="LIBRARY" Style="{StaticResource PanelHeaderStyle}" />
                         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,2,6,0">
                             <Button Style="{StaticResource MaterialDesignToolButton}"
+                                    Command="{Binding Library.ClearFolderFilterCommand}"
+                                    Width="26" Height="26" Padding="0"
+                                    ToolTip="Show every folder"
+                                    Foreground="{DynamicResource PrimaryHueMidBrush}"
+                                    Visibility="{Binding Library.HasFolderFilter, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                <materialDesign:PackIcon Kind="FilterRemoveOutline" Width="16" Height="16" />
+                            </Button>
+                            <Button Style="{StaticResource MaterialDesignToolButton}"
                                     Command="{Binding Library.AddRootCommand}"
                                     Width="26" Height="26" Padding="0"
                                     ToolTip="Add folder">
@@ -155,84 +163,99 @@
                             <ComboBox ItemsSource="{Binding Library.SizeFilters}"
                                       SelectedItem="{Binding Library.SelectedSizeFilter}"
                                       DisplayMemberPath="Label"
-                                      Margin="0,0,0,8"
                                       materialDesign:HintAssist.Hint="File size" />
-
-                            <ComboBox ItemsSource="{Binding Library.FolderFilters}"
-                                      SelectedItem="{Binding Library.SelectedFolderFilter}"
-                                      DisplayMemberPath="Label"
-                                      MaxDropDownHeight="360"
-                                      ToolTip="{Binding Library.SelectedFolderFilter.FullPath}"
-                                      ScrollViewer.CanContentScroll="True"
-                                      VirtualizingPanel.IsVirtualizing="True"
-                                      VirtualizingPanel.VirtualizationMode="Recycling"
-                                      materialDesign:HintAssist.Hint="Folder subtree" />
                         </StackPanel>
                     </Border>
 
+                    <!-- The folder tree is also the roots list — the roots are its
+                         top level. Selecting any node restricts the results to that
+                         subtree; the filter-clear button in the header undoes it. -->
                     <Grid>
-                        <ItemsControl ItemsSource="{Binding Library.Roots}" Margin="4,0">
-                            <ItemsControl.ItemTemplate>
-                                <DataTemplate>
-                                    <Border x:Name="RootRow" Background="Transparent" CornerRadius="4" Padding="8,6" Margin="0,1">
-                                        <Grid ToolTip="{Binding Path}">
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="Auto" />
-                                                <ColumnDefinition Width="*" />
-                                                <ColumnDefinition Width="Auto" />
-                                            </Grid.ColumnDefinitions>
+                        <TreeView ItemsSource="{Binding Library.FolderTree}"
+                                  BorderThickness="0"
+                                  Background="Transparent"
+                                  Margin="2,0"
+                                  ScrollViewer.CanContentScroll="True"
+                                  ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                                  VirtualizingPanel.IsVirtualizing="True"
+                                  VirtualizingPanel.VirtualizationMode="Recycling">
 
-                                            <!-- Network roots are marked because they behave
-                                                 differently: slower, and scanned with their own
-                                                 concurrency limit. -->
-                                            <materialDesign:PackIcon Grid.Column="0"
-                                                                     Width="16" Height="16"
-                                                                     Margin="0,2,8,0"
-                                                                     VerticalAlignment="Top"
-                                                                     Foreground="{StaticResource TextMutedBrush}"
-                                                                     Kind="{Binding IsNetwork, Converter={StaticResource NetworkFolderIconConverter}}" />
+                            <TreeView.ItemContainerStyle>
+                                <Style TargetType="TreeViewItem" BasedOn="{StaticResource MaterialDesignTreeViewItem}">
+                                    <!-- Two-way, because both flags are also written by the
+                                         view model: selection is restored after a rescan, and
+                                         the clear-filter button drops the highlight. -->
+                                    <Setter Property="IsExpanded" Value="{Binding IsExpanded, Mode=TwoWay}" />
+                                    <Setter Property="IsSelected" Value="{Binding IsSelected, Mode=TwoWay}" />
+                                </Style>
+                            </TreeView.ItemContainerStyle>
 
-                                            <StackPanel Grid.Column="1">
-                                                <TextBlock Text="{Binding DisplayName}" TextTrimming="CharacterEllipsis" />
-                                                <StackPanel Orientation="Horizontal">
-                                                    <TextBlock Text="{Binding CountText}" Style="{StaticResource StatusTextStyle}" />
-                                                    <TextBlock Text="  ·  not fully scanned"
-                                                               Style="{StaticResource StatusTextStyle}"
-                                                               Visibility="{Binding IsIncomplete, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                                                </StackPanel>
+                            <TreeView.ItemTemplate>
+                                <HierarchicalDataTemplate ItemsSource="{Binding Children}">
+                                    <Grid x:Name="NodeRow" ToolTip="{Binding FullPath}" Margin="0,1">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+
+                                        <materialDesign:PackIcon Grid.Column="0"
+                                                                 Width="16" Height="16"
+                                                                 Margin="0,1,7,0"
+                                                                 VerticalAlignment="Top"
+                                                                 Foreground="{StaticResource TextMutedBrush}"
+                                                                 Kind="{Binding Converter={StaticResource FolderIconConverter}}" />
+
+                                        <StackPanel Grid.Column="1">
+                                            <TextBlock x:Name="NodeName"
+                                                       Text="{Binding Name}"
+                                                       TextTrimming="CharacterEllipsis" />
+
+                                            <!-- Counts only on roots. One per folder turns a
+                                                 deep tree into a wall of numbers, and the row
+                                                 height doubles for every node. -->
+                                            <StackPanel Orientation="Horizontal"
+                                                        Visibility="{Binding IsRoot, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                                <TextBlock Text="{Binding CountText}" Style="{StaticResource StatusTextStyle}" />
+                                                <TextBlock Text="  ·  not fully scanned"
+                                                           Style="{StaticResource StatusTextStyle}"
+                                                           Visibility="{Binding Root.IsIncomplete, Converter={StaticResource BooleanToVisibilityConverter}}" />
                                             </StackPanel>
+                                        </StackPanel>
 
-                                            <Button Grid.Column="2"
-                                                    x:Name="RemoveButton"
-                                                    Style="{StaticResource MaterialDesignToolButton}"
-                                                    Width="22" Height="22" Padding="0"
-                                                    Opacity="0"
-                                                    VerticalAlignment="Top"
-                                                    ToolTip="Remove from library"
-                                                    Command="{Binding DataContext.Library.RemoveRootCommand,
-                                                              RelativeSource={RelativeSource AncestorType=Window}}"
-                                                    CommandParameter="{Binding}">
-                                                <materialDesign:PackIcon Kind="Close" Width="14" Height="14" />
-                                            </Button>
-                                        </Grid>
-                                    </Border>
+                                        <Button Grid.Column="2"
+                                                x:Name="RemoveButton"
+                                                Style="{StaticResource MaterialDesignToolButton}"
+                                                Width="22" Height="22" Padding="0"
+                                                Opacity="0"
+                                                VerticalAlignment="Top"
+                                                ToolTip="Remove from library"
+                                                Visibility="{Binding IsRoot, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                                Command="{Binding DataContext.Library.RemoveRootCommand,
+                                                          RelativeSource={RelativeSource AncestorType=Window}}"
+                                                CommandParameter="{Binding Root}">
+                                            <materialDesign:PackIcon Kind="Close" Width="14" Height="14" />
+                                        </Button>
+                                    </Grid>
 
-                                    <DataTemplate.Triggers>
+                                    <HierarchicalDataTemplate.Triggers>
+                                        <DataTrigger Binding="{Binding IsRoot}" Value="True">
+                                            <Setter TargetName="NodeName" Property="FontWeight" Value="SemiBold" />
+                                        </DataTrigger>
+
                                         <!-- Remove is hidden until the row is hovered: it is
                                              destructive and there is one per root. -->
-                                        <Trigger SourceName="RootRow" Property="IsMouseOver" Value="True">
-                                            <Setter TargetName="RootRow" Property="Background" Value="#FF2A2A2A" />
+                                        <Trigger SourceName="NodeRow" Property="IsMouseOver" Value="True">
                                             <Setter TargetName="RemoveButton" Property="Opacity" Value="1" />
                                         </Trigger>
-                                    </DataTemplate.Triggers>
-                                </DataTemplate>
-                            </ItemsControl.ItemTemplate>
-                        </ItemsControl>
+                                    </HierarchicalDataTemplate.Triggers>
+                                </HierarchicalDataTemplate>
+                            </TreeView.ItemTemplate>
+                        </TreeView>
 
                         <TextBlock Style="{StaticResource PlaceholderStyle}" Margin="16"
                                    Text="No library folders yet.&#x0a;&#x0a;Use + to add one."
-                                   Visibility="{Binding Library.Roots.Count,
-                                                Converter={StaticResource ZeroToVisibilityConverter}}" />
+                                   Visibility="{Binding Library.HasRoots, Converter={StaticResource InverseBooleanToVisibilityConverter}}" />
                     </Grid>
                 </DockPanel>
             </Border>
@@ -264,6 +287,7 @@
                              recycling containers and scrolling by pixel are what keep
                              a 100k-row list scrolling at frame rate. -->
                         <ListBox ItemsSource="{Binding Library.Models}"
+                                 SelectedItem="{Binding Library.SelectedModel, Mode=TwoWay}"
                                  BorderThickness="0"
                                  Background="Transparent"
                                  HorizontalContentAlignment="Stretch"
@@ -277,6 +301,41 @@
                                 <Style TargetType="ListBoxItem" BasedOn="{StaticResource MaterialDesignListBoxItem}">
                                     <Setter Property="Padding" Value="10,5" />
                                     <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+
+                                    <!-- A context menu lives in its own visual tree and cannot
+                                         walk up to the window for the commands, so Tag carries
+                                         the view model across the gap. One menu instance is
+                                         shared by every row — a Setter value always is — hence
+                                         both bindings go through PlacementTarget explicitly
+                                         rather than leaning on an inherited DataContext.
+                                         The row acted on is the one right-clicked, which need
+                                         not be the selected one. -->
+                                    <Setter Property="Tag"
+                                            Value="{Binding DataContext, RelativeSource={RelativeSource AncestorType=ListBox}}" />
+                                    <Setter Property="ContextMenu">
+                                        <Setter.Value>
+                                            <ContextMenu>
+                                                <MenuItem Header="Open in Explorer"
+                                                          Command="{Binding PlacementTarget.Tag.RevealCommand,
+                                                                    RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                                          CommandParameter="{Binding PlacementTarget.DataContext.FullPath,
+                                                                            RelativeSource={RelativeSource AncestorType=ContextMenu}}">
+                                                    <MenuItem.Icon>
+                                                        <materialDesign:PackIcon Kind="FolderSearchOutline" />
+                                                    </MenuItem.Icon>
+                                                </MenuItem>
+                                                <MenuItem Header="Copy path"
+                                                          Command="{Binding PlacementTarget.Tag.CopyPathCommand,
+                                                                    RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                                          CommandParameter="{Binding PlacementTarget.DataContext.FullPath,
+                                                                            RelativeSource={RelativeSource AncestorType=ContextMenu}}">
+                                                    <MenuItem.Icon>
+                                                        <materialDesign:PackIcon Kind="ContentCopy" />
+                                                    </MenuItem.Icon>
+                                                </MenuItem>
+                                            </ContextMenu>
+                                        </Setter.Value>
+                                    </Setter>
                                 </Style>
                             </ListBox.ItemContainerStyle>
 
@@ -377,8 +436,49 @@
                 <!-- Empty state, hidden as soon as geometry exists -->
                 <TextBlock Style="{StaticResource PlaceholderStyle}"
                            IsHitTestVisible="False"
-                           Visibility="{Binding HasModel, Converter={StaticResource InverseBooleanToVisibilityConverter}}"
+                           Visibility="{Binding ShowEmptyState, Converter={StaticResource BooleanToVisibilityConverter}}"
                            Text="No model loaded&#x0a;&#x0a;Ctrl+O, or drop an .stl or .3mf file here" />
+
+                <!-- Error state. A corrupt or unreadable file gets a named reason
+                     and a way to go look at it, rather than a blank viewport that
+                     is indistinguishable from "still loading". -->
+                <Border MaxWidth="460" Margin="24"
+                        HorizontalAlignment="Center" VerticalAlignment="Center"
+                        Background="{StaticResource PanelBackgroundBrush}"
+                        BorderBrush="{StaticResource PanelBorderBrush}"
+                        BorderThickness="1" CornerRadius="6" Padding="24,20"
+                        Visibility="{Binding HasError, Converter={StaticResource BooleanToVisibilityConverter}}">
+                    <StackPanel>
+                        <StackPanel Orientation="Horizontal">
+                            <materialDesign:PackIcon Kind="AlertCircleOutline"
+                                                     Width="22" Height="22"
+                                                     VerticalAlignment="Center"
+                                                     Foreground="{DynamicResource ValidationErrorBrush}" />
+                            <TextBlock Text="{Binding ModelName}"
+                                       Margin="10,0,0,0"
+                                       FontWeight="SemiBold"
+                                       VerticalAlignment="Center"
+                                       TextTrimming="CharacterEllipsis" />
+                        </StackPanel>
+
+                        <TextBlock Text="{Binding ErrorMessage}"
+                                   Margin="0,12,0,0"
+                                   TextWrapping="Wrap"
+                                   Foreground="{StaticResource TextMutedBrush}" />
+
+                        <StackPanel Orientation="Horizontal" Margin="0,14,0,0" HorizontalAlignment="Right">
+                            <Button Style="{StaticResource MaterialDesignFlatButton}"
+                                    Command="{Binding CopyPathCommand}"
+                                    CommandParameter="{Binding CurrentPath}"
+                                    Content="COPY PATH" />
+                            <Button Style="{StaticResource MaterialDesignFlatButton}"
+                                    Margin="8,0,0,0"
+                                    Command="{Binding RevealCommand}"
+                                    CommandParameter="{Binding CurrentPath}"
+                                    Content="OPEN IN EXPLORER" />
+                        </StackPanel>
+                    </StackPanel>
+                </Border>
 
                 <!-- Busy indicator -->
                 <Border Background="#99000000"
@@ -426,6 +526,27 @@
                 </StackPanel>
 
                 <StackPanel Grid.Column="2" Orientation="Horizontal">
+                    <!-- Bound to CurrentPath rather than to the selected row, so
+                         these also work for a file opened with Ctrl+O or dropped
+                         on the window, which has no row in the library at all. -->
+                    <StackPanel Orientation="Horizontal" Margin="0,0,12,0"
+                                Visibility="{Binding HasCurrentPath, Converter={StaticResource BooleanToVisibilityConverter}}">
+                        <Button Style="{StaticResource MaterialDesignToolButton}"
+                                Width="22" Height="22" Padding="0"
+                                ToolTip="Copy path"
+                                Command="{Binding CopyPathCommand}"
+                                CommandParameter="{Binding CurrentPath}">
+                            <materialDesign:PackIcon Kind="ContentCopy" Width="14" Height="14" />
+                        </Button>
+                        <Button Style="{StaticResource MaterialDesignToolButton}"
+                                Width="22" Height="22" Padding="0"
+                                ToolTip="Open in Explorer"
+                                Command="{Binding RevealCommand}"
+                                CommandParameter="{Binding CurrentPath}">
+                            <materialDesign:PackIcon Kind="FolderSearchOutline" Width="14" Height="14" />
+                        </Button>
+                    </StackPanel>
+
                     <TextBlock Text="{Binding TriangleCountText}" Style="{StaticResource StatusTextStyle}" />
                     <TextBlock Text="  ·  " Style="{StaticResource StatusTextStyle}"
                                Visibility="{Binding TimingText, Converter={StaticResource NonEmptyToVisibilityConverter}}" />

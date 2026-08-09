@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Windows;
 using System.Windows.Data;
 using MaterialDesignThemes.Wpf;
+using ModelExplorer.App.ViewModels;
 
 namespace ModelExplorer.App;
 
@@ -61,25 +62,17 @@ public sealed class FileSizeConverter : IValueConverter
         throw new NotSupportedException();
 }
 
-/// <summary>Visible only when the bound count is zero. Used for empty states.</summary>
-public sealed class ZeroToVisibilityConverter : IValueConverter
-{
-    public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture) =>
-        value is int and 0 ? Visibility.Visible : Visibility.Collapsed;
-
-    public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture) =>
-        throw new NotSupportedException();
-}
-
 /// <summary>
-/// Picks the sidebar icon for a library root. Network roots are marked because
-/// they behave differently — slower, and scanned under their own concurrency
-/// limit — so it is worth seeing at a glance which is which.
+/// Picks the icon for a node in the library tree. Network roots are marked
+/// because they behave differently — slower, and scanned under their own
+/// concurrency limit — so it is worth seeing at a glance which is which.
 /// </summary>
-public sealed class NetworkFolderIconConverter : IValueConverter
+public sealed class FolderIconConverter : IValueConverter
 {
     public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture) =>
-        value is true ? PackIconKind.FolderNetworkOutline : PackIconKind.FolderOutline;
+        value is FolderNode { Root.IsNetwork: true }
+            ? PackIconKind.FolderNetworkOutline
+            : PackIconKind.FolderOutline;
 
     public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture) =>
         throw new NotSupportedException();

@@ -1,4 +1,3 @@
-using System.Collections.ObjectModel;
 using System.IO;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -14,8 +13,8 @@ namespace ModelExplorer.App.ViewModels;
 /// <remarks>
 /// Split from <see cref="MainViewModel"/> because the two share nothing: one owns
 /// a GPU scene, the other owns a database and a background pipeline. Keeping the
-/// scan's state machine out of the viewer is what lets step 5 wire selection
-/// between them as a single, obvious seam.
+/// scan's state machine out of the viewer is what lets selection be wired between
+/// them as a single, obvious seam.
 /// </remarks>
 public sealed partial class LibraryViewModel : ObservableObject
 {
@@ -54,26 +53,39 @@ public sealed partial class LibraryViewModel : ObservableObject
 
         _selectedExtensionFilter = ExtensionFilters[0];
         _selectedSizeFilter = SizeFilters[0];
-        _selectedFolderFilter = FolderFilters[0];
     }
-
-    public ObservableCollection<LibraryRootViewModel> Roots { get; } = [];
 
     public IReadOnlyList<ExtensionFilterOption> ExtensionFilters { get; }
 
     public IReadOnlyList<SizeFilterOption> SizeFilters { get; }
 
+    /// <summary>
+    /// The library as a folder hierarchy: one node per root, subfolders beneath.
+    /// </summary>
+    /// <remarks>
+    /// This doubles as the roots list — the roots are simply its top level — so
+    /// there is one place in the sidebar that shows the shape of the library
+    /// rather than a flat root list and a redundant folder picker beside it.
+    /// </remarks>
     [ObservableProperty]
-    private IReadOnlyList<FolderFilterOption> _folderFilters = [FolderFilterOption.All];
+    [NotifyPropertyChangedFor(nameof(HasRoots))]
+    private IReadOnlyList<FolderNode> _folderTree = [];
+
+    public bool HasRoots => FolderTree.Count > 0;
+
+    /// <summary>The folder subtree the results are restricted to. Null means the whole library.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasFolderFilter))]
+    [NotifyCanExecuteChangedFor(nameof(ClearFolderFilterCommand))]
+    private FolderNode? _selectedFolder;
+
+    public bool HasFolderFilter => SelectedFolder is not null;
 
     [ObservableProperty]
     private ExtensionFilterOption _selectedExtensionFilter = null!;
 
     [ObservableProperty]
     private SizeFilterOption _selectedSizeFilter = null!;
-
-    [ObservableProperty]
-    private FolderFilterOption _selectedFolderFilter = null!;
 
     [ObservableProperty]
     private string _searchText = string.Empty;
@@ -95,6 +107,19 @@ public sealed partial class LibraryViewModel : ObservableObject
     private IReadOnlyList<ModelFile> _models = [];
 
     public bool HasModels => Models.Count > 0;
+
+    /// <summary>
+    /// The row the viewer is following.
+    /// </summary>
+    /// <remarks>
+    /// Set back to null by the ListBox itself every time <see cref="Models"/> is
+    /// replaced, which happens on every keystroke in the search box.
+    /// <see cref="StartSearchAsync"/> restores it when the same file survives the
+    /// new filter, and consumers treat null as "nothing new to show" rather than
+    /// as "unload" — otherwise refining a search would blank the viewport.
+    /// </remarks>
+    [ObservableProperty]
+    private ModelFile? _selectedModel;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasIndexedModels))]
@@ -155,16 +180,10 @@ public sealed partial class LibraryViewModel : ObservableObject
             _index = await Task.Run(() =>
                 new IndexService(new ModelIndexStore(ModelIndexStore.DefaultPath), _extensions));
 
-            var roots = await _index.GetRootsAsync();
-            var files = await _index.LoadFilesAsync();
-
-            ApplyRoots(roots, files);
-            await ReplaceFilesAsync(roots, files);
+            await ReloadAsync();
             IsReady = true;
 
-            ScanStatus = Roots.Count == 0
-                ? "Add a folder to build your library"
-                : string.Empty;
+            ScanStatus = HasRoots ? string.Empty : "Add a folder to build your library";
         }
         catch (Exception ex) when (ex is SqliteException or IOException or UnauthorizedAccessException)
         {
@@ -222,11 +241,20 @@ public sealed partial class LibraryViewModel : ObservableObject
         }
 
         await _index.RemoveRootAsync(root.Id);
+        await ReloadAsync();
+    }
 
-        var roots = await _index.GetRootsAsync();
-        var files = await _index.LoadFilesAsync();
-        ApplyRoots(roots, files);
-        await ReplaceFilesAsync(roots, files);
+    /// <summary>Drops the folder restriction and shows the whole library again.</summary>
+    [RelayCommand(CanExecute = nameof(HasFolderFilter))]
+    private void ClearFolderFilter()
+    {
+        if (SelectedFolder is { } node)
+        {
+            // Clears the highlight in the tree; the TreeView owns that flag and
+            // will not drop it just because the filter did.
+            node.IsSelected = false;
+            SelectedFolder = null;
+        }
     }
 
     /// <summary>
@@ -268,11 +296,7 @@ public sealed partial class LibraryViewModel : ObservableObject
         try
         {
             var summary = await _index.ScanAsync(roots, progress, cancellation.Token);
-
-            var allRoots = await _index.GetRootsAsync();
-            var files = await _index.LoadFilesAsync();
-            ApplyRoots(allRoots, files);
-            await ReplaceFilesAsync(allRoots, files);
+            await ReloadAsync();
 
             ScanStatus = summary.Cancelled
                 ? $"Scan cancelled — {summary.Indexed:N0} files indexed"
@@ -290,20 +314,17 @@ public sealed partial class LibraryViewModel : ObservableObject
         }
     }
 
-    /// <summary>Rebuilds the sidebar, with each root's share of the file count.</summary>
-    private void ApplyRoots(IReadOnlyList<LibraryRoot> roots, IReadOnlyList<ModelFile> files)
+    /// <summary>Re-reads the index and rebuilds everything derived from it.</summary>
+    private async Task ReloadAsync()
     {
-        var counts = new Dictionary<long, int>();
-        foreach (var file in files)
+        if (_index is null)
         {
-            counts[file.RootId] = counts.GetValueOrDefault(file.RootId) + 1;
+            return;
         }
 
-        Roots.Clear();
-        foreach (var root in roots)
-        {
-            Roots.Add(new LibraryRootViewModel(root, counts.GetValueOrDefault(root.Id)));
-        }
+        var roots = await _index.GetRootsAsync();
+        var files = await _index.LoadFilesAsync();
+        await ReplaceFilesAsync(roots, files);
     }
 
     partial void OnSearchTextChanged(string value) => ScheduleSearch();
@@ -312,12 +333,15 @@ public sealed partial class LibraryViewModel : ObservableObject
 
     partial void OnSelectedSizeFilterChanged(SizeFilterOption value) => ScheduleSearch();
 
-    partial void OnSelectedFolderFilterChanged(FolderFilterOption value) => ScheduleSearch();
+    partial void OnSelectedFolderChanged(FolderNode? value) => ScheduleSearch();
+
+    /// <summary>Called by a node when the TreeView selects it.</summary>
+    private void OnFolderNodeSelected(FolderNode node) => SelectedFolder = node;
 
     /// <summary>
     /// Builds a new immutable search snapshot after loading or scanning. The
-    /// lower-casing, one-time sorting, and folder projection all stay off the UI
-    /// thread; only the final property swaps happen here.
+    /// lower-casing, one-time sorting, and folder tree projection all stay off the
+    /// UI thread; only the final property swaps happen here.
     /// </summary>
     private async Task ReplaceFilesAsync(
         IReadOnlyList<LibraryRoot> roots,
@@ -325,17 +349,32 @@ public sealed partial class LibraryViewModel : ObservableObject
     {
         CancelActiveSearch();
 
-        var (searchIndex, folderFilters) = await Task.Run(() =>
-            (new ModelSearchIndex(files), BuildFolderFilters(roots, files)));
+        // Captured before the rebuild replaces every node instance, so the tree
+        // can be put back the way the user left it.
+        var previousFolder = SelectedFolder;
+        var expanded = CollectExpanded(FolderTree);
 
-        var previousFolder = SelectedFolderFilter;
+        var (searchIndex, tree) = await Task.Run(() =>
+            (new ModelSearchIndex(files), BuildFolderTree(roots, files, OnFolderNodeSelected)));
+
         _searchIndex = searchIndex;
         TotalModelCount = searchIndex.Count;
 
         _suppressSearch = true;
-        FolderFilters = folderFilters;
-        SelectedFolderFilter = folderFilters.FirstOrDefault(option => option.SameSubtreeAs(previousFolder))
-            ?? FolderFilterOption.All;
+        FolderTree = tree;
+        SelectedFolder = null;
+
+        // First build of the session: open the roots so the library's shape is
+        // visible without a click.
+        if (expanded.Count == 0)
+        {
+            foreach (var root in tree)
+            {
+                root.IsExpanded = true;
+            }
+        }
+
+        RestoreFolderState(tree, expanded, previousFolder);
         _suppressSearch = false;
 
         await StartSearchAsync(debounce: false);
@@ -377,10 +416,14 @@ public sealed partial class LibraryViewModel : ObservableObject
             if (ReferenceEquals(searchIndex, _searchIndex) &&
                 ReferenceEquals(cancellation, _searchCancellation))
             {
+                var previousSelection = SelectedModel;
+
                 Models = result.Models;
                 ResultStatus = result.Models.Count == 1
                     ? $"1 result · {result.Elapsed.TotalMilliseconds:N1} ms"
                     : $"{result.Models.Count:N0} results · {result.Elapsed.TotalMilliseconds:N1} ms";
+
+                RestoreSelection(previousSelection, result.Models);
             }
         }
         catch (OperationCanceledException)
@@ -394,13 +437,40 @@ public sealed partial class LibraryViewModel : ObservableObject
         }
     }
 
+    /// <summary>
+    /// Re-selects the previously selected file if it is still in the results.
+    /// </summary>
+    /// <remarks>
+    /// Assigning <see cref="Models"/> makes the ListBox drop its selection, so
+    /// without this every keystroke would leave the highlighted row behind even
+    /// when it is still on screen. Matched on identity, not path: the snapshot
+    /// hands out the same <see cref="ModelFile"/> instances to every query, so a
+    /// reference comparison is both correct and free.
+    /// </remarks>
+    private void RestoreSelection(ModelFile? previous, IReadOnlyList<ModelFile> results)
+    {
+        if (previous is null)
+        {
+            return;
+        }
+
+        for (var i = 0; i < results.Count; i++)
+        {
+            if (ReferenceEquals(results[i], previous))
+            {
+                SelectedModel = previous;
+                return;
+            }
+        }
+    }
+
     private ModelSearchQuery CreateSearchQuery() => new(
         SearchText,
         SelectedExtensionFilter.Extension,
         SelectedSizeFilter.MinimumBytes,
         SelectedSizeFilter.MaximumBytesExclusive,
-        SelectedFolderFilter.RootId,
-        SelectedFolderFilter.RelativePath);
+        SelectedFolder?.RootId,
+        SelectedFolder?.RelativePath);
 
     private void CancelActiveSearch()
     {
@@ -408,49 +478,166 @@ public sealed partial class LibraryViewModel : ObservableObject
         previous?.Cancel();
     }
 
-    private static IReadOnlyList<FolderFilterOption> BuildFolderFilters(
-        IReadOnlyList<LibraryRoot> roots,
-        IReadOnlyList<ModelFile> files)
+    private static HashSet<string> CollectExpanded(IReadOnlyList<FolderNode> nodes)
     {
-        var foldersByRoot = roots.ToDictionary(
-            root => root.Id,
-            _ => new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+        var expanded = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        Walk(nodes);
+        return expanded;
 
-        foreach (var file in files)
+        void Walk(IReadOnlyList<FolderNode> level)
         {
-            if (!foldersByRoot.TryGetValue(file.RootId, out var folders))
+            foreach (var node in level)
             {
-                continue;
-            }
+                if (node.IsExpanded)
+                {
+                    expanded.Add(node.FullPath);
+                }
 
-            var folder = Path.GetDirectoryName(file.RelativePath);
-            while (!string.IsNullOrEmpty(folder))
-            {
-                folders.Add(folder);
-                folder = Path.GetDirectoryName(folder);
+                Walk(node.Children);
             }
         }
-
-        var options = new List<FolderFilterOption> { FolderFilterOption.All };
-        foreach (var root in roots.OrderBy(root => root.Path, StringComparer.OrdinalIgnoreCase))
-        {
-            options.Add(new FolderFilterOption(root.DisplayName, root.Id, string.Empty, root.Path));
-
-            foreach (var folder in foldersByRoot[root.Id].OrderBy(path => path, StringComparer.OrdinalIgnoreCase))
-            {
-                options.Add(new FolderFilterOption(
-                    $"{root.DisplayName}  ›  {folder}",
-                    root.Id,
-                    folder,
-                    Path.Join(root.Path, folder)));
-            }
-        }
-
-        return options;
     }
+
+    /// <summary>
+    /// Reapplies expansion and selection to a freshly built tree.
+    /// </summary>
+    /// <returns>Whether this level contains the restored selection.</returns>
+    private static bool RestoreFolderState(
+        IReadOnlyList<FolderNode> nodes,
+        HashSet<string> expanded,
+        FolderNode? previous)
+    {
+        var found = false;
+
+        foreach (var node in nodes)
+        {
+            if (expanded.Contains(node.FullPath))
+            {
+                node.IsExpanded = true;
+            }
+
+            var hit = previous is not null && node.SameSubtreeAs(previous);
+            if (hit)
+            {
+                node.IsSelected = true;
+            }
+
+            // An ancestor of the restored selection has to be open, or the
+            // highlighted row is somewhere the user cannot see.
+            if (RestoreFolderState(node.Children, expanded, previous))
+            {
+                node.IsExpanded = true;
+                hit = true;
+            }
+
+            found |= hit;
+        }
+
+        return found;
+    }
+
+    /// <summary>
+    /// Wraps the index's folder projection in the view state the TreeView needs.
+    /// The shape and the counts come from <see cref="FolderTreeBuilder"/>; only expansion
+    /// and selection are added here.
+    /// </summary>
+    private static IReadOnlyList<FolderNode> BuildFolderTree(
+        IReadOnlyList<LibraryRoot> roots,
+        IReadOnlyList<ModelFile> files,
+        Action<FolderNode> onSelected)
+    {
+        var rootsById = roots.ToDictionary(root => root.Id);
+
+        return
+        [
+            .. FolderTreeBuilder.Build(roots, files)
+                .Select(summary => ToNode(
+                    summary,
+                    new LibraryRootViewModel(rootsById[summary.RootId], summary.FileCount),
+                    onSelected)),
+        ];
+    }
+
+    private static FolderNode ToNode(
+        FolderSummary summary,
+        LibraryRootViewModel? root,
+        Action<FolderNode> onSelected) =>
+        new(
+            onSelected,
+            summary,
+            root,
+            [.. summary.Children.Select(child => ToNode(child, null, onSelected))]);
 }
 
-/// <summary>One row in the library sidebar.</summary>
+/// <summary>
+/// One folder in the library tree. Roots are the top level and carry the extra
+/// state the sidebar shows for them.
+/// </summary>
+public sealed partial class FolderNode : ObservableObject
+{
+    private readonly Action<FolderNode> _onSelected;
+    private readonly FolderSummary _summary;
+
+    internal FolderNode(
+        Action<FolderNode> onSelected,
+        FolderSummary summary,
+        LibraryRootViewModel? root,
+        IReadOnlyList<FolderNode> children)
+    {
+        _onSelected = onSelected;
+        _summary = summary;
+        Root = root;
+        Children = children;
+    }
+
+    public string Name => _summary.Name;
+
+    public long RootId => _summary.RootId;
+
+    /// <summary>Path below the root. Empty for a root node, which means "the whole root".</summary>
+    public string RelativePath => _summary.RelativePath;
+
+    public string FullPath => _summary.FullPath;
+
+    /// <summary>Files in this folder and everything under it.</summary>
+    public int FileCount => _summary.FileCount;
+
+    public IReadOnlyList<FolderNode> Children { get; }
+
+    /// <summary>Non-null only for a root node.</summary>
+    public LibraryRootViewModel? Root { get; }
+
+    public bool IsRoot => Root is not null;
+
+    public string CountText => FileCount == 1 ? "1 model" : $"{FileCount:N0} models";
+
+    [ObservableProperty]
+    private bool _isExpanded;
+
+    [ObservableProperty]
+    private bool _isSelected;
+
+    /// <summary>
+    /// A TreeView's SelectedItem is read-only, so selection is picked up from the
+    /// container's IsSelected instead. Only the transition to true is interesting:
+    /// WPF clears the old node before setting the new one, and reacting to the
+    /// clear would filter to the whole library for one frame in between.
+    /// </summary>
+    partial void OnIsSelectedChanged(bool value)
+    {
+        if (value)
+        {
+            _onSelected(this);
+        }
+    }
+
+    public bool SameSubtreeAs(FolderNode? other) =>
+        other is not null &&
+        RootId == other.RootId &&
+        string.Equals(RelativePath, other.RelativePath, StringComparison.OrdinalIgnoreCase);
+}
+
+/// <summary>A library root, as shown on the tree's top-level nodes.</summary>
 public sealed class LibraryRootViewModel(LibraryRoot root, int fileCount)
 {
     public long Id => root.Id;
@@ -473,17 +660,3 @@ public sealed record SizeFilterOption(
     string Label,
     long? MinimumBytes,
     long? MaximumBytesExclusive);
-
-public sealed record FolderFilterOption(
-    string Label,
-    long? RootId,
-    string? RelativePath,
-    string? FullPath)
-{
-    public static FolderFilterOption All { get; } = new("All folders", null, null, null);
-
-    public bool SameSubtreeAs(FolderFilterOption? other) =>
-        other is not null &&
-        RootId == other.RootId &&
-        string.Equals(RelativePath, other.RelativePath, StringComparison.OrdinalIgnoreCase);
-}

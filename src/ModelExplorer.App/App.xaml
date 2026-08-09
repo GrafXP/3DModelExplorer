@@ -16,8 +16,7 @@
             <local:NonEmptyToVisibilityConverter x:Key="NonEmptyToVisibilityConverter" />
             <local:FileSizeConverter x:Key="FileSizeConverter" />
             <local:LocalTimeConverter x:Key="LocalTimeConverter" />
-            <local:ZeroToVisibilityConverter x:Key="ZeroToVisibilityConverter" />
-            <local:NetworkFolderIconConverter x:Key="NetworkFolderIconConverter" />
+            <local:FolderIconConverter x:Key="FolderIconConverter" />
 
             <!-- Surfaces. Deliberately darker than the Material default paper so a
                  rendered model reads as the brightest thing on screen. -->
