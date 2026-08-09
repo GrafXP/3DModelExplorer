@@ -26,6 +26,21 @@ public sealed partial class MainViewModel : ObservableObject
     public DefaultEffectsManager EffectsManager { get; } = new();
 
     /// <summary>
+    /// Library roots, scanning and the indexed list. Selecting a row does not
+    /// load it into the viewer yet — that seam, with its cancellation semantics,
+    /// is step 5.
+    /// </summary>
+    public LibraryViewModel Library { get; }
+
+    public MainViewModel()
+    {
+        Library = new LibraryViewModel(_loaders.SupportedExtensions);
+    }
+
+    /// <summary>Whether a dropped or supplied path is a format we can open.</summary>
+    public bool IsSupported(string path) => _loaders.IsSupported(path);
+
+    /// <summary>
     /// Z-up, matching how slicers and printers present a model. HelixToolkit
     /// defaults to Y-up, which would lay every print on its side.
     /// </summary>

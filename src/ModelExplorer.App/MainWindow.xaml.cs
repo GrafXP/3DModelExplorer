@@ -34,7 +34,16 @@ public partial class MainWindow : Window
 
     private async void OnWindowLoaded(object sender, RoutedEventArgs e)
     {
-        if (App.StartupFile is { } path && ViewModel is { } viewModel)
+        if (ViewModel is not { } viewModel)
+        {
+            return;
+        }
+
+        // The index is opened and read after the window is up, so a slow disk
+        // delays the list rather than the first frame.
+        await viewModel.Library.InitializeAsync();
+
+        if (App.StartupFile is { } path)
         {
             await viewModel.LoadAsync(path);
         }
@@ -101,9 +110,13 @@ public partial class MainWindow : Window
         }
     }
 
-    private static string? TryGetDroppedModel(DragEventArgs e)
+    /// <summary>
+    /// Accepts whatever the loader registry accepts, so a format added to the
+    /// registry works here without a second list to keep in step.
+    /// </summary>
+    private string? TryGetDroppedModel(DragEventArgs e)
     {
-        if (!e.Data.GetDataPresent(DataFormats.FileDrop))
+        if (ViewModel is not { } viewModel || !e.Data.GetDataPresent(DataFormats.FileDrop))
         {
             return null;
         }
@@ -113,8 +126,7 @@ public partial class MainWindow : Window
             return null;
         }
 
-        return paths.FirstOrDefault(p =>
-            Path.GetExtension(p.AsSpan()).Equals(".stl", StringComparison.OrdinalIgnoreCase));
+        return paths.FirstOrDefault(viewModel.IsSupported);
     }
 
     /// <summary>

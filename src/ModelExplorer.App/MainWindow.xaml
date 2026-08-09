@@ -77,7 +77,8 @@
                         </StackPanel>
                     </Button>
                     <Button Style="{StaticResource MaterialDesignFlatButton}"
-                            IsEnabled="False" ToolTip="Add library folder (Step 3)">
+                            Command="{Binding Library.AddRootCommand}"
+                            ToolTip="Add library folder">
                         <materialDesign:PackIcon Kind="FolderPlusOutline" />
                     </Button>
                     <Button Style="{StaticResource MaterialDesignFlatButton}"
@@ -100,9 +101,103 @@
 
             <Border Grid.Column="0" Background="{StaticResource PanelBackgroundBrush}">
                 <DockPanel>
-                    <TextBlock DockPanel.Dock="Top" Text="LIBRARY" Style="{StaticResource PanelHeaderStyle}" />
-                    <TextBlock Style="{StaticResource PlaceholderStyle}" Margin="16"
-                               Text="No library folders yet.&#x0a;&#x0a;Added in Step 3." />
+                    <Grid DockPanel.Dock="Top">
+                        <TextBlock Text="LIBRARY" Style="{StaticResource PanelHeaderStyle}" />
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,2,6,0">
+                            <Button Style="{StaticResource MaterialDesignToolButton}"
+                                    Command="{Binding Library.AddRootCommand}"
+                                    Width="26" Height="26" Padding="0"
+                                    ToolTip="Add folder">
+                                <materialDesign:PackIcon Kind="Plus" Width="16" Height="16" />
+                            </Button>
+                            <Button Style="{StaticResource MaterialDesignToolButton}"
+                                    Command="{Binding Library.RescanCommand}"
+                                    Width="26" Height="26" Padding="0"
+                                    ToolTip="Rescan every folder"
+                                    Visibility="{Binding Library.IsScanning, Converter={StaticResource InverseBooleanToVisibilityConverter}}">
+                                <materialDesign:PackIcon Kind="Refresh" Width="16" Height="16" />
+                            </Button>
+                            <Button Style="{StaticResource MaterialDesignToolButton}"
+                                    Command="{Binding Library.CancelScanCommand}"
+                                    Width="26" Height="26" Padding="0"
+                                    ToolTip="Cancel scan"
+                                    Foreground="{DynamicResource PrimaryHueMidBrush}"
+                                    Visibility="{Binding Library.IsScanning, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                <materialDesign:PackIcon Kind="StopCircleOutline" Width="16" Height="16" />
+                            </Button>
+                        </StackPanel>
+                    </Grid>
+
+                    <TextBlock DockPanel.Dock="Bottom"
+                               Style="{StaticResource StatusTextStyle}"
+                               Margin="12,6,12,10"
+                               TextWrapping="Wrap"
+                               Text="{Binding Library.ModelCountText}" />
+
+                    <Grid>
+                        <ItemsControl ItemsSource="{Binding Library.Roots}" Margin="4,0">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Border x:Name="RootRow" Background="Transparent" CornerRadius="4" Padding="8,6" Margin="0,1">
+                                        <Grid ToolTip="{Binding Path}">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+
+                                            <!-- Network roots are marked because they behave
+                                                 differently: slower, and scanned with their own
+                                                 concurrency limit. -->
+                                            <materialDesign:PackIcon Grid.Column="0"
+                                                                     Width="16" Height="16"
+                                                                     Margin="0,2,8,0"
+                                                                     VerticalAlignment="Top"
+                                                                     Foreground="{StaticResource TextMutedBrush}"
+                                                                     Kind="{Binding IsNetwork, Converter={StaticResource NetworkFolderIconConverter}}" />
+
+                                            <StackPanel Grid.Column="1">
+                                                <TextBlock Text="{Binding DisplayName}" TextTrimming="CharacterEllipsis" />
+                                                <StackPanel Orientation="Horizontal">
+                                                    <TextBlock Text="{Binding CountText}" Style="{StaticResource StatusTextStyle}" />
+                                                    <TextBlock Text="  ·  not fully scanned"
+                                                               Style="{StaticResource StatusTextStyle}"
+                                                               Visibility="{Binding IsIncomplete, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                                </StackPanel>
+                                            </StackPanel>
+
+                                            <Button Grid.Column="2"
+                                                    x:Name="RemoveButton"
+                                                    Style="{StaticResource MaterialDesignToolButton}"
+                                                    Width="22" Height="22" Padding="0"
+                                                    Opacity="0"
+                                                    VerticalAlignment="Top"
+                                                    ToolTip="Remove from library"
+                                                    Command="{Binding DataContext.Library.RemoveRootCommand,
+                                                              RelativeSource={RelativeSource AncestorType=Window}}"
+                                                    CommandParameter="{Binding}">
+                                                <materialDesign:PackIcon Kind="Close" Width="14" Height="14" />
+                                            </Button>
+                                        </Grid>
+                                    </Border>
+
+                                    <DataTemplate.Triggers>
+                                        <!-- Remove is hidden until the row is hovered: it is
+                                             destructive and there is one per root. -->
+                                        <Trigger SourceName="RootRow" Property="IsMouseOver" Value="True">
+                                            <Setter TargetName="RootRow" Property="Background" Value="#FF2A2A2A" />
+                                            <Setter TargetName="RemoveButton" Property="Opacity" Value="1" />
+                                        </Trigger>
+                                    </DataTemplate.Triggers>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+
+                        <TextBlock Style="{StaticResource PlaceholderStyle}" Margin="16"
+                                   Text="No library folders yet.&#x0a;&#x0a;Use + to add one."
+                                   Visibility="{Binding Library.Roots.Count,
+                                                Converter={StaticResource ZeroToVisibilityConverter}}" />
+                    </Grid>
                 </DockPanel>
             </Border>
 
@@ -114,8 +209,70 @@
                     BorderThickness="1,0">
                 <DockPanel>
                     <TextBlock DockPanel.Dock="Top" Text="MODELS" Style="{StaticResource PanelHeaderStyle}" />
-                    <TextBlock Style="{StaticResource PlaceholderStyle}" Margin="16"
-                               Text="Nothing indexed.&#x0a;&#x0a;List arrives in Step 3,&#x0a;thumbnail grid in Step 6." />
+
+                    <Grid>
+                        <!-- Virtualization is explicit rather than left to defaults:
+                             recycling containers and scrolling by pixel are what keep
+                             a 100k-row list scrolling at frame rate. -->
+                        <ListBox ItemsSource="{Binding Library.Models}"
+                                 BorderThickness="0"
+                                 Background="Transparent"
+                                 HorizontalContentAlignment="Stretch"
+                                 ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                 VirtualizingPanel.IsVirtualizing="True"
+                                 VirtualizingPanel.VirtualizationMode="Recycling"
+                                 VirtualizingPanel.ScrollUnit="Pixel"
+                                 VirtualizingPanel.CacheLengthUnit="Page"
+                                 Visibility="{Binding Library.HasModels, Converter={StaticResource BooleanToVisibilityConverter}}">
+                            <ListBox.ItemContainerStyle>
+                                <Style TargetType="ListBoxItem" BasedOn="{StaticResource MaterialDesignListBoxItem}">
+                                    <Setter Property="Padding" Value="10,5" />
+                                    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                </Style>
+                            </ListBox.ItemContainerStyle>
+
+                            <ListBox.ItemTemplate>
+                                <DataTemplate>
+                                    <!-- Two lines rather than four columns: the pane is
+                                         narrow by default, and name over folder with the
+                                         numbers right-aligned stays readable at any width. -->
+                                    <Grid ToolTip="{Binding FullPath}">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                        </Grid.RowDefinitions>
+
+                                        <TextBlock Grid.Row="0" Grid.Column="0"
+                                                   Text="{Binding Name}"
+                                                   TextTrimming="CharacterEllipsis" />
+
+                                        <TextBlock Grid.Row="0" Grid.Column="1"
+                                                   Margin="10,0,0,0"
+                                                   Style="{StaticResource StatusTextStyle}"
+                                                   Text="{Binding Size, Converter={StaticResource FileSizeConverter}}" />
+
+                                        <TextBlock Grid.Row="1" Grid.Column="0"
+                                                   Style="{StaticResource StatusTextStyle}"
+                                                   TextTrimming="CharacterEllipsis"
+                                                   Text="{Binding Folder}" />
+
+                                        <TextBlock Grid.Row="1" Grid.Column="1"
+                                                   Margin="10,0,0,0"
+                                                   Style="{StaticResource StatusTextStyle}"
+                                                   Text="{Binding ModifiedUtc, Converter={StaticResource LocalTimeConverter}}" />
+                                    </Grid>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+
+                        <TextBlock Style="{StaticResource PlaceholderStyle}" Margin="16"
+                                   Visibility="{Binding Library.HasModels, Converter={StaticResource InverseBooleanToVisibilityConverter}}"
+                                   Text="Nothing indexed yet.&#x0a;&#x0a;Add a library folder to scan.&#x0a;Thumbnail grid arrives in Step 6." />
+                    </Grid>
                 </DockPanel>
             </Border>
 
@@ -172,7 +329,7 @@
                 <TextBlock Style="{StaticResource PlaceholderStyle}"
                            IsHitTestVisible="False"
                            Visibility="{Binding HasModel, Converter={StaticResource InverseBooleanToVisibilityConverter}}"
-                           Text="No model loaded&#x0a;&#x0a;Ctrl+O, or drop an .stl file here" />
+                           Text="No model loaded&#x0a;&#x0a;Ctrl+O, or drop an .stl or .3mf file here" />
 
                 <!-- Busy indicator -->
                 <Border Background="#99000000"
@@ -199,6 +356,7 @@
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
 
                 <TextBlock Grid.Column="0"
@@ -206,7 +364,19 @@
                            TextTrimming="CharacterEllipsis"
                            Style="{StaticResource StatusTextStyle}" />
 
-                <StackPanel Grid.Column="1" Orientation="Horizontal">
+                <!-- Scan progress gets its own cell rather than sharing the message
+                     line, so a running scan and a model load never overwrite each
+                     other's text. -->
+                <StackPanel Grid.Column="1" Orientation="Horizontal" Margin="16,0"
+                            Visibility="{Binding Library.ScanStatus, Converter={StaticResource NonEmptyToVisibilityConverter}}">
+                    <ProgressBar Style="{StaticResource MaterialDesignCircularProgressBar}"
+                                 Width="13" Height="13" Margin="0,0,7,0"
+                                 Value="0" IsIndeterminate="True"
+                                 Visibility="{Binding Library.IsScanning, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                    <TextBlock Text="{Binding Library.ScanStatus}" Style="{StaticResource StatusTextStyle}" />
+                </StackPanel>
+
+                <StackPanel Grid.Column="2" Orientation="Horizontal">
                     <TextBlock Text="{Binding TriangleCountText}" Style="{StaticResource StatusTextStyle}" />
                     <TextBlock Text="  ·  " Style="{StaticResource StatusTextStyle}"
                                Visibility="{Binding TimingText, Converter={StaticResource NonEmptyToVisibilityConverter}}" />
