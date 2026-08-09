@@ -56,13 +56,13 @@
                                Margin="8,0,0,0" VerticalAlignment="Center" />
                 </StackPanel>
 
-                <!-- Inert until Step 4. -->
                 <TextBox Grid.Column="1"
                          Margin="24,0"
                          MaxWidth="520"
                          HorizontalAlignment="Stretch"
                          VerticalAlignment="Center"
-                         IsEnabled="False"
+                         IsEnabled="{Binding Library.IsReady}"
+                         Text="{Binding Library.SearchText, UpdateSourceTrigger=PropertyChanged}"
                          Style="{StaticResource MaterialDesignOutlinedTextBox}"
                          materialDesign:HintAssist.Hint="Search models…"
                          materialDesign:TextFieldAssist.HasClearButton="True" />
@@ -133,6 +133,42 @@
                                Margin="12,6,12,10"
                                TextWrapping="Wrap"
                                Text="{Binding Library.ModelCountText}" />
+
+                    <!-- Search metadata stays in the sidebar: it remains visible
+                         while the results pane is narrow and does not compete with
+                         the primary search box for header width. -->
+                    <Border DockPanel.Dock="Bottom"
+                            BorderBrush="{StaticResource PanelBorderBrush}"
+                            BorderThickness="0,1,0,0"
+                            Padding="12,8,12,4">
+                        <StackPanel>
+                            <TextBlock Text="FILTERS"
+                                       Style="{StaticResource PanelHeaderStyle}"
+                                       Margin="0,0,0,6" />
+
+                            <ComboBox ItemsSource="{Binding Library.ExtensionFilters}"
+                                      SelectedItem="{Binding Library.SelectedExtensionFilter}"
+                                      DisplayMemberPath="Label"
+                                      Margin="0,0,0,8"
+                                      materialDesign:HintAssist.Hint="Format" />
+
+                            <ComboBox ItemsSource="{Binding Library.SizeFilters}"
+                                      SelectedItem="{Binding Library.SelectedSizeFilter}"
+                                      DisplayMemberPath="Label"
+                                      Margin="0,0,0,8"
+                                      materialDesign:HintAssist.Hint="File size" />
+
+                            <ComboBox ItemsSource="{Binding Library.FolderFilters}"
+                                      SelectedItem="{Binding Library.SelectedFolderFilter}"
+                                      DisplayMemberPath="Label"
+                                      MaxDropDownHeight="360"
+                                      ToolTip="{Binding Library.SelectedFolderFilter.FullPath}"
+                                      ScrollViewer.CanContentScroll="True"
+                                      VirtualizingPanel.IsVirtualizing="True"
+                                      VirtualizingPanel.VirtualizationMode="Recycling"
+                                      materialDesign:HintAssist.Hint="Folder subtree" />
+                        </StackPanel>
+                    </Border>
 
                     <Grid>
                         <ItemsControl ItemsSource="{Binding Library.Roots}" Margin="4,0">
@@ -208,7 +244,20 @@
                     BorderBrush="{StaticResource PanelBorderBrush}"
                     BorderThickness="1,0">
                 <DockPanel>
-                    <TextBlock DockPanel.Dock="Top" Text="MODELS" Style="{StaticResource PanelHeaderStyle}" />
+                    <Grid DockPanel.Dock="Top" Margin="12,10,12,6">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Grid.Column="0" Text="MODELS"
+                                   Style="{StaticResource PanelHeaderStyle}"
+                                   Margin="0" />
+                        <TextBlock Grid.Column="1"
+                                   Text="{Binding Library.ResultStatus}"
+                                   Style="{StaticResource StatusTextStyle}"
+                                   HorizontalAlignment="Right"
+                                   TextTrimming="CharacterEllipsis" />
+                    </Grid>
 
                     <Grid>
                         <!-- Virtualization is explicit rather than left to defaults:
@@ -271,7 +320,7 @@
 
                         <TextBlock Style="{StaticResource PlaceholderStyle}" Margin="16"
                                    Visibility="{Binding Library.HasModels, Converter={StaticResource InverseBooleanToVisibilityConverter}}"
-                                   Text="Nothing indexed yet.&#x0a;&#x0a;Add a library folder to scan.&#x0a;Thumbnail grid arrives in Step 6." />
+                                   Text="{Binding Library.EmptyModelsText}" />
                     </Grid>
                 </DockPanel>
             </Border>

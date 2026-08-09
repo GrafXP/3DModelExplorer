@@ -19,16 +19,64 @@ namespace ModelExplorer.App.ViewModels;
 /// </remarks>
 public sealed partial class LibraryViewModel : ObservableObject
 {
+    private const int SearchDebounceMilliseconds = 60;
+    private const long Megabyte = 1024 * 1024;
+
     private readonly string[] _extensions;
     private IndexService? _index;
+    private ModelSearchIndex? _searchIndex;
     private CancellationTokenSource? _scanCancellation;
+    private CancellationTokenSource? _searchCancellation;
+    private bool _suppressSearch;
 
     public LibraryViewModel(IReadOnlyList<string> extensions)
     {
         _extensions = [.. extensions];
+
+        ExtensionFilters =
+        [
+            new("All formats", null),
+            .. _extensions
+                .OrderBy(extension => extension, StringComparer.OrdinalIgnoreCase)
+                .Select(extension => new ExtensionFilterOption(
+                    extension.TrimStart('.').ToUpperInvariant(),
+                    extension)),
+        ];
+
+        SizeFilters =
+        [
+            new("Any size", null, null),
+            new("Under 1 MB", null, Megabyte),
+            new("1–10 MB", Megabyte, 10 * Megabyte),
+            new("10–100 MB", 10 * Megabyte, 100 * Megabyte),
+            new("100 MB or larger", 100 * Megabyte, null),
+        ];
+
+        _selectedExtensionFilter = ExtensionFilters[0];
+        _selectedSizeFilter = SizeFilters[0];
+        _selectedFolderFilter = FolderFilters[0];
     }
 
     public ObservableCollection<LibraryRootViewModel> Roots { get; } = [];
+
+    public IReadOnlyList<ExtensionFilterOption> ExtensionFilters { get; }
+
+    public IReadOnlyList<SizeFilterOption> SizeFilters { get; }
+
+    [ObservableProperty]
+    private IReadOnlyList<FolderFilterOption> _folderFilters = [FolderFilterOption.All];
+
+    [ObservableProperty]
+    private ExtensionFilterOption _selectedExtensionFilter = null!;
+
+    [ObservableProperty]
+    private SizeFilterOption _selectedSizeFilter = null!;
+
+    [ObservableProperty]
+    private FolderFilterOption _selectedFolderFilter = null!;
+
+    [ObservableProperty]
+    private string _searchText = string.Empty;
 
     /// <summary>
     /// A plain list, not an observable collection.
@@ -43,17 +91,32 @@ public sealed partial class LibraryViewModel : ObservableObject
     /// </remarks>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasModels))]
-    [NotifyPropertyChangedFor(nameof(ModelCountText))]
+    [NotifyPropertyChangedFor(nameof(EmptyModelsText))]
     private IReadOnlyList<ModelFile> _models = [];
 
     public bool HasModels => Models.Count > 0;
 
-    public string ModelCountText => Models.Count switch
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasIndexedModels))]
+    [NotifyPropertyChangedFor(nameof(ModelCountText))]
+    [NotifyPropertyChangedFor(nameof(EmptyModelsText))]
+    private int _totalModelCount;
+
+    public bool HasIndexedModels => TotalModelCount > 0;
+
+    public string ModelCountText => TotalModelCount switch
     {
         0 => "No models indexed",
         1 => "1 model",
         var n => $"{n:N0} models",
     };
+
+    public string EmptyModelsText => HasIndexedModels
+        ? "No models match the current search and filters."
+        : "Nothing indexed yet.\n\nAdd a library folder to scan.\nThumbnail grid arrives in Step 6.";
+
+    [ObservableProperty]
+    private string _resultStatus = "0 results";
 
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(AddRootCommand))]
@@ -96,7 +159,7 @@ public sealed partial class LibraryViewModel : ObservableObject
             var files = await _index.LoadFilesAsync();
 
             ApplyRoots(roots, files);
-            Models = files;
+            await ReplaceFilesAsync(roots, files);
             IsReady = true;
 
             ScanStatus = Roots.Count == 0
@@ -163,7 +226,7 @@ public sealed partial class LibraryViewModel : ObservableObject
         var roots = await _index.GetRootsAsync();
         var files = await _index.LoadFilesAsync();
         ApplyRoots(roots, files);
-        Models = files;
+        await ReplaceFilesAsync(roots, files);
     }
 
     /// <summary>
@@ -209,7 +272,7 @@ public sealed partial class LibraryViewModel : ObservableObject
             var allRoots = await _index.GetRootsAsync();
             var files = await _index.LoadFilesAsync();
             ApplyRoots(allRoots, files);
-            Models = files;
+            await ReplaceFilesAsync(allRoots, files);
 
             ScanStatus = summary.Cancelled
                 ? $"Scan cancelled — {summary.Indexed:N0} files indexed"
@@ -242,6 +305,149 @@ public sealed partial class LibraryViewModel : ObservableObject
             Roots.Add(new LibraryRootViewModel(root, counts.GetValueOrDefault(root.Id)));
         }
     }
+
+    partial void OnSearchTextChanged(string value) => ScheduleSearch();
+
+    partial void OnSelectedExtensionFilterChanged(ExtensionFilterOption value) => ScheduleSearch();
+
+    partial void OnSelectedSizeFilterChanged(SizeFilterOption value) => ScheduleSearch();
+
+    partial void OnSelectedFolderFilterChanged(FolderFilterOption value) => ScheduleSearch();
+
+    /// <summary>
+    /// Builds a new immutable search snapshot after loading or scanning. The
+    /// lower-casing, one-time sorting, and folder projection all stay off the UI
+    /// thread; only the final property swaps happen here.
+    /// </summary>
+    private async Task ReplaceFilesAsync(
+        IReadOnlyList<LibraryRoot> roots,
+        IReadOnlyList<ModelFile> files)
+    {
+        CancelActiveSearch();
+
+        var (searchIndex, folderFilters) = await Task.Run(() =>
+            (new ModelSearchIndex(files), BuildFolderFilters(roots, files)));
+
+        var previousFolder = SelectedFolderFilter;
+        _searchIndex = searchIndex;
+        TotalModelCount = searchIndex.Count;
+
+        _suppressSearch = true;
+        FolderFilters = folderFilters;
+        SelectedFolderFilter = folderFilters.FirstOrDefault(option => option.SameSubtreeAs(previousFolder))
+            ?? FolderFilterOption.All;
+        _suppressSearch = false;
+
+        await StartSearchAsync(debounce: false);
+    }
+
+    private void ScheduleSearch()
+    {
+        if (!_suppressSearch)
+        {
+            _ = StartSearchAsync(debounce: true);
+        }
+    }
+
+    private async Task StartSearchAsync(bool debounce)
+    {
+        if (_searchIndex is not { } searchIndex)
+        {
+            return;
+        }
+
+        CancelActiveSearch();
+        var cancellation = new CancellationTokenSource();
+        _searchCancellation = cancellation;
+        var token = cancellation.Token;
+        var query = CreateSearchQuery();
+
+        try
+        {
+            if (debounce)
+            {
+                await Task.Delay(SearchDebounceMilliseconds, token);
+            }
+
+            var result = await Task.Run(() => searchIndex.Search(query, token), token);
+            token.ThrowIfCancellationRequested();
+
+            // A rescan can replace the immutable snapshot while this worker is
+            // finishing. Its results belong to the old snapshot and must not land.
+            if (ReferenceEquals(searchIndex, _searchIndex) &&
+                ReferenceEquals(cancellation, _searchCancellation))
+            {
+                Models = result.Models;
+                ResultStatus = result.Models.Count == 1
+                    ? $"1 result · {result.Elapsed.TotalMilliseconds:N1} ms"
+                    : $"{result.Models.Count:N0} results · {result.Elapsed.TotalMilliseconds:N1} ms";
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // A newer keystroke or index snapshot owns the visible results.
+        }
+        finally
+        {
+            Interlocked.CompareExchange(ref _searchCancellation, null, cancellation);
+            cancellation.Dispose();
+        }
+    }
+
+    private ModelSearchQuery CreateSearchQuery() => new(
+        SearchText,
+        SelectedExtensionFilter.Extension,
+        SelectedSizeFilter.MinimumBytes,
+        SelectedSizeFilter.MaximumBytesExclusive,
+        SelectedFolderFilter.RootId,
+        SelectedFolderFilter.RelativePath);
+
+    private void CancelActiveSearch()
+    {
+        var previous = Interlocked.Exchange(ref _searchCancellation, null);
+        previous?.Cancel();
+    }
+
+    private static IReadOnlyList<FolderFilterOption> BuildFolderFilters(
+        IReadOnlyList<LibraryRoot> roots,
+        IReadOnlyList<ModelFile> files)
+    {
+        var foldersByRoot = roots.ToDictionary(
+            root => root.Id,
+            _ => new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+
+        foreach (var file in files)
+        {
+            if (!foldersByRoot.TryGetValue(file.RootId, out var folders))
+            {
+                continue;
+            }
+
+            var folder = Path.GetDirectoryName(file.RelativePath);
+            while (!string.IsNullOrEmpty(folder))
+            {
+                folders.Add(folder);
+                folder = Path.GetDirectoryName(folder);
+            }
+        }
+
+        var options = new List<FolderFilterOption> { FolderFilterOption.All };
+        foreach (var root in roots.OrderBy(root => root.Path, StringComparer.OrdinalIgnoreCase))
+        {
+            options.Add(new FolderFilterOption(root.DisplayName, root.Id, string.Empty, root.Path));
+
+            foreach (var folder in foldersByRoot[root.Id].OrderBy(path => path, StringComparer.OrdinalIgnoreCase))
+            {
+                options.Add(new FolderFilterOption(
+                    $"{root.DisplayName}  ›  {folder}",
+                    root.Id,
+                    folder,
+                    Path.Join(root.Path, folder)));
+            }
+        }
+
+        return options;
+    }
 }
 
 /// <summary>One row in the library sidebar.</summary>
@@ -259,4 +465,25 @@ public sealed class LibraryRootViewModel(LibraryRoot root, int fileCount)
 
     /// <summary>Flagged in the UI: the root was only partly scanned.</summary>
     public bool IsIncomplete => root.LastScanUtc is null;
+}
+
+public sealed record ExtensionFilterOption(string Label, string? Extension);
+
+public sealed record SizeFilterOption(
+    string Label,
+    long? MinimumBytes,
+    long? MaximumBytesExclusive);
+
+public sealed record FolderFilterOption(
+    string Label,
+    long? RootId,
+    string? RelativePath,
+    string? FullPath)
+{
+    public static FolderFilterOption All { get; } = new("All folders", null, null, null);
+
+    public bool SameSubtreeAs(FolderFilterOption? other) =>
+        other is not null &&
+        RootId == other.RootId &&
+        string.Equals(RelativePath, other.RelativePath, StringComparison.OrdinalIgnoreCase);
 }
