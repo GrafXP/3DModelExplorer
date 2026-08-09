@@ -94,6 +94,17 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
+    /// Stops the thumbnail workers. They are background threads and would not
+    /// hold the process open, but one in the middle of a large parse would keep
+    /// reading a file for seconds after the window is gone.
+    /// </summary>
+    protected override void OnClosed(EventArgs e)
+    {
+        ViewModel?.Thumbnails.Dispose();
+        base.OnClosed(e);
+    }
+
+    /// <summary>
     /// Right-click picks a point on the model and makes it the orbit centre.
     /// Right-clicking empty space clears it, returning the pivot to the model
     /// centre. Without this, orbiting a large print always swings around its

@@ -9,7 +9,9 @@ using HelixToolkit.Maths;
 using HelixToolkit.SharpDX;
 using HelixToolkit.Wpf.SharpDX;
 using Microsoft.Win32;
+using ModelExplorer.App.Thumbnails;
 using ModelExplorer.Geometry;
+using ModelExplorer.Indexing;
 
 // System.Windows.Media.Media3D (needed for Point3D/Vector3D) declares types with
 // the same names as HelixToolkit's DirectX equivalents. Alias the DX ones so it
@@ -49,13 +51,21 @@ public sealed partial class MainViewModel : ObservableObject
 
     public DefaultEffectsManager EffectsManager { get; } = new();
 
+    /// <summary>
+    /// Renders and caches the grid's thumbnails. Owned here because it outlives
+    /// any one set of results, and reached from the rows through an inherited
+    /// attached property rather than through the bindings.
+    /// </summary>
+    public ThumbnailService Thumbnails { get; }
+
     /// <summary>Library roots, scanning, search and the indexed list.</summary>
     public LibraryViewModel Library { get; }
 
     public MainViewModel()
     {
         _loads = new GeometryLoadScheduler(_loaders.Load);
-        Library = new LibraryViewModel(_loaders.SupportedExtensions);
+        Thumbnails = new ThumbnailService(_loaders, new ThumbnailCache(ThumbnailCache.DefaultDirectory));
+        Library = new LibraryViewModel(_loaders.SupportedExtensions, Thumbnails);
 
         // The library knows nothing about the viewer; the viewer follows it. That
         // keeps the scan/search state machine free of any rendering concern and

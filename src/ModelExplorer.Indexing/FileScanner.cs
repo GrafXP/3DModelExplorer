@@ -45,7 +45,9 @@ public static class FileScanner
         return new FileSystemEnumerable<ScannedEntry>(start, Transform, options)
         {
             ShouldIncludePredicate = (ref FileSystemEntry entry) =>
-                !entry.IsDirectory && HasExtension(entry.FileName, extensions),
+                !entry.IsDirectory &&
+                !IsMacResourceFork(entry.FileName) &&
+                HasExtension(entry.FileName, extensions),
 
             // Reparse points are excluded from recursion explicitly rather than
             // left to AttributesToSkip: a junction pointing at one of its own
@@ -83,6 +85,20 @@ public static class FileScanner
             ? Path.Join(directory[skip..], entry.FileName)
             : entry.FileName.ToString();
     }
+
+    /// <summary>
+    /// AppleDouble sidecars — "._model.stl" beside "model.stl".
+    /// </summary>
+    /// <remarks>
+    /// macOS leaves one next to every file it copies onto a share that cannot
+    /// hold its metadata, which is any NAS or Windows drive. They carry the
+    /// extension of the file they shadow, so an extension filter lets them
+    /// straight through, and they are not models: each is a few KB of metadata
+    /// that no parser can read. On a library that has ever been touched from a
+    /// Mac they can outnumber the real files.
+    /// </remarks>
+    private static bool IsMacResourceFork(ReadOnlySpan<char> fileName) =>
+        fileName.StartsWith("._", StringComparison.Ordinal);
 
     private static bool HasExtension(ReadOnlySpan<char> fileName, string[] extensions)
     {

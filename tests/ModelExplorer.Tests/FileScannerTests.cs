@@ -21,6 +21,24 @@ public class FileScannerTests
     }
 
     /// <summary>
+    /// AppleDouble sidecars carry the extension of the file they shadow, so the
+    /// extension filter alone lets every one of them through. On a library that
+    /// has been touched from a Mac they can outnumber the real models.
+    /// </summary>
+    [Fact]
+    public void MacResourceForksAreNotModels()
+    {
+        using var dir = new TempDirectory();
+        IndexingFixtures.CreateFile(dir.Path, "cube.stl");
+        IndexingFixtures.CreateFile(dir.Path, "._cube.stl");
+        IndexingFixtures.CreateFile(dir.Path, Path.Combine("parts", "._bracket.3mf"));
+
+        var found = FileScanner.Enumerate(dir.Path, IndexingFixtures.Extensions).ToList();
+
+        Assert.Equal(["cube.stl"], found.Select(f => f.RelativePath));
+    }
+
+    /// <summary>
     /// The relative path is built from span arithmetic against the root, which is
     /// exactly the kind of thing that silently shears off a leading character.
     /// </summary>

@@ -4,6 +4,9 @@
         xmlns:materialDesign="http://materialdesigninxaml.net/winfx/xaml/themes"
         xmlns:hx="http://helix-toolkit.org/wpf/SharpDX"
         xmlns:vm="clr-namespace:ModelExplorer.App.ViewModels"
+        xmlns:thumbs="clr-namespace:ModelExplorer.App.Thumbnails"
+        xmlns:vwp="clr-namespace:WpfToolkit.Controls;assembly=VirtualizingWrapPanel"
+        thumbs:ThumbnailImage.Service="{Binding Thumbnails}"
         Title="3D Model Explorer"
         Height="820" Width="1400"
         MinHeight="520" MinWidth="900"
@@ -22,6 +25,98 @@
     <Window.DataContext>
         <vm:MainViewModel />
     </Window.DataContext>
+
+    <Window.Resources>
+        <!-- ══ Results: list skin ══ -->
+        <ItemsPanelTemplate x:Key="ModelRowPanel">
+            <VirtualizingStackPanel />
+        </ItemsPanelTemplate>
+
+        <DataTemplate x:Key="ModelRowTemplate">
+            <!-- Two lines rather than four columns: the pane is narrow by
+                 default, and name over folder with the numbers right-aligned
+                 stays readable at any width. -->
+            <Grid ToolTip="{Binding FullPath}">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <TextBlock Grid.Row="0" Grid.Column="0"
+                           Text="{Binding Name}"
+                           TextTrimming="CharacterEllipsis" />
+
+                <TextBlock Grid.Row="0" Grid.Column="1"
+                           Margin="10,0,0,0"
+                           Style="{StaticResource StatusTextStyle}"
+                           Text="{Binding Size, Converter={StaticResource FileSizeConverter}}" />
+
+                <TextBlock Grid.Row="1" Grid.Column="0"
+                           Style="{StaticResource StatusTextStyle}"
+                           TextTrimming="CharacterEllipsis"
+                           Text="{Binding Folder}" />
+
+                <TextBlock Grid.Row="1" Grid.Column="1"
+                           Margin="10,0,0,0"
+                           Style="{StaticResource StatusTextStyle}"
+                           Text="{Binding ModifiedUtc, Converter={StaticResource LocalTimeConverter}}" />
+            </Grid>
+        </DataTemplate>
+
+        <!-- ══ Results: grid skin ══ -->
+        <ItemsPanelTemplate x:Key="ModelTilePanel">
+            <!-- ItemSize is supplied rather than measured: with every tile the
+                 same size the panel can compute which rows intersect the
+                 viewport, instead of realizing containers to find out. -->
+            <vwp:VirtualizingWrapPanel Orientation="Horizontal"
+                                       ItemSize="{Binding Library.TileSize}"
+                                       SpacingMode="Uniform"
+                                       StretchItems="False" />
+        </ItemsPanelTemplate>
+
+        <DataTemplate x:Key="ModelTileTemplate">
+            <StackPanel Width="{Binding DataContext.Library.ThumbnailSize,
+                                RelativeSource={RelativeSource AncestorType=ListBox}}"
+                        ToolTip="{Binding FullPath}">
+                <Grid Height="{Binding DataContext.Library.ThumbnailSize,
+                               RelativeSource={RelativeSource AncestorType=ListBox}}">
+                    <!-- Shown until the render lands. The thumbnail has a
+                         transparent background, so this cannot simply sit
+                         behind it — it would show through the model. -->
+                    <materialDesign:PackIcon x:Name="Placeholder"
+                                             Kind="CubeOutline"
+                                             Width="32" Height="32"
+                                             Visibility="Collapsed"
+                                             HorizontalAlignment="Center"
+                                             VerticalAlignment="Center"
+                                             Foreground="{StaticResource PanelBorderBrush}" />
+
+                    <Image x:Name="Thumbnail"
+                           Stretch="Uniform"
+                           StretchDirection="DownOnly"
+                           RenderOptions.BitmapScalingMode="HighQuality"
+                           thumbs:ThumbnailImage.SourceFile="{Binding}" />
+                </Grid>
+
+                <TextBlock Text="{Binding Name}"
+                           Margin="0,4,0,0"
+                           TextAlignment="Center"
+                           TextTrimming="CharacterEllipsis"
+                           MaxHeight="32"
+                           TextWrapping="Wrap" />
+            </StackPanel>
+
+            <DataTemplate.Triggers>
+                <Trigger SourceName="Thumbnail" Property="Source" Value="{x:Null}">
+                    <Setter TargetName="Placeholder" Property="Visibility" Value="Visible" />
+                </Trigger>
+            </DataTemplate.Triggers>
+        </DataTemplate>
+    </Window.Resources>
 
     <Window.InputBindings>
         <KeyBinding Key="O" Modifiers="Control" Command="{Binding OpenModelCommand}" />
@@ -267,19 +362,56 @@
                     BorderBrush="{StaticResource PanelBorderBrush}"
                     BorderThickness="1,0">
                 <DockPanel>
-                    <Grid DockPanel.Dock="Top" Margin="12,10,12,6">
+                    <Grid DockPanel.Dock="Top" Margin="12,10,6,6">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
+
                         <TextBlock Grid.Column="0" Text="MODELS"
                                    Style="{StaticResource PanelHeaderStyle}"
-                                   Margin="0" />
+                                   Margin="0" VerticalAlignment="Center" />
+
                         <TextBlock Grid.Column="1"
                                    Text="{Binding Library.ResultStatus}"
                                    Style="{StaticResource StatusTextStyle}"
                                    HorizontalAlignment="Right"
+                                   Margin="8,0"
                                    TextTrimming="CharacterEllipsis" />
+
+                        <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                            <!-- Only meaningful for the grid, so it goes away with it
+                                 rather than sitting there doing nothing. -->
+                            <Slider Width="80"
+                                    Margin="0,0,4,0"
+                                    VerticalAlignment="Center"
+                                    Minimum="{Binding Library.MinimumThumbnailSize, Mode=OneTime}"
+                                    Maximum="{Binding Library.MaximumThumbnailSize, Mode=OneTime}"
+                                    Value="{Binding Library.ThumbnailSize}"
+                                    IsSnapToTickEnabled="True"
+                                    TickFrequency="8"
+                                    ToolTip="Thumbnail size"
+                                    Visibility="{Binding Library.IsGridView, Converter={StaticResource BooleanToVisibilityConverter}}" />
+
+                            <Button Style="{StaticResource MaterialDesignToolButton}"
+                                    Width="26" Height="26" Padding="0"
+                                    ToolTip="Clear cached thumbnails and render them again"
+                                    Command="{Binding Library.ClearThumbnailCacheCommand}">
+                                <materialDesign:PackIcon Kind="ImageRemoveOutline" Width="16" Height="16" />
+                            </Button>
+
+                            <ToggleButton Style="{StaticResource MaterialDesignActionToggleButton}"
+                                          Width="26" Height="26"
+                                          Margin="4,0,0,0"
+                                          ToolTip="Switch between grid and list"
+                                          IsChecked="{Binding Library.IsGridView}">
+                                <materialDesign:PackIcon Kind="ViewList" Width="15" Height="15" />
+                                <materialDesign:ToggleButtonAssist.OnContent>
+                                    <materialDesign:PackIcon Kind="ViewGridOutline" Width="15" Height="15" />
+                                </materialDesign:ToggleButtonAssist.OnContent>
+                            </ToggleButton>
+                        </StackPanel>
                     </Grid>
 
                     <Grid>
@@ -297,6 +429,25 @@
                                  VirtualizingPanel.ScrollUnit="Pixel"
                                  VirtualizingPanel.CacheLengthUnit="Page"
                                  Visibility="{Binding Library.HasModels, Converter={StaticResource BooleanToVisibilityConverter}}">
+
+                            <!-- Grid and list are one ListBox with two skins, not two
+                                 controls. A second ListBox would mean a second two-way
+                                 SelectedItem binding onto the same property, and the
+                                 hidden one would fight the visible one every time the
+                                 results are replaced. -->
+                            <ListBox.Style>
+                                <Style TargetType="ListBox" BasedOn="{StaticResource MaterialDesignListBox}">
+                                    <Setter Property="ItemTemplate" Value="{StaticResource ModelRowTemplate}" />
+                                    <Setter Property="ItemsPanel" Value="{StaticResource ModelRowPanel}" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding Library.IsGridView}" Value="True">
+                                            <Setter Property="ItemTemplate" Value="{StaticResource ModelTileTemplate}" />
+                                            <Setter Property="ItemsPanel" Value="{StaticResource ModelTilePanel}" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </ListBox.Style>
+
                             <ListBox.ItemContainerStyle>
                                 <Style TargetType="ListBoxItem" BasedOn="{StaticResource MaterialDesignListBoxItem}">
                                     <Setter Property="Padding" Value="10,5" />
@@ -336,45 +487,21 @@
                                             </ContextMenu>
                                         </Setter.Value>
                                     </Setter>
+
+                                    <Style.Triggers>
+                                        <!-- Tiles are a fixed size and centred; rows stretch.
+                                             The padding has to agree with TileSize or the
+                                             panel's arithmetic and the content disagree. -->
+                                        <DataTrigger Binding="{Binding DataContext.Library.IsGridView,
+                                                              RelativeSource={RelativeSource AncestorType=ListBox}}"
+                                                     Value="True">
+                                            <Setter Property="Padding" Value="8,4" />
+                                            <Setter Property="HorizontalContentAlignment" Value="Center" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
                                 </Style>
                             </ListBox.ItemContainerStyle>
 
-                            <ListBox.ItemTemplate>
-                                <DataTemplate>
-                                    <!-- Two lines rather than four columns: the pane is
-                                         narrow by default, and name over folder with the
-                                         numbers right-aligned stays readable at any width. -->
-                                    <Grid ToolTip="{Binding FullPath}">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="Auto" />
-                                        </Grid.ColumnDefinitions>
-                                        <Grid.RowDefinitions>
-                                            <RowDefinition Height="Auto" />
-                                            <RowDefinition Height="Auto" />
-                                        </Grid.RowDefinitions>
-
-                                        <TextBlock Grid.Row="0" Grid.Column="0"
-                                                   Text="{Binding Name}"
-                                                   TextTrimming="CharacterEllipsis" />
-
-                                        <TextBlock Grid.Row="0" Grid.Column="1"
-                                                   Margin="10,0,0,0"
-                                                   Style="{StaticResource StatusTextStyle}"
-                                                   Text="{Binding Size, Converter={StaticResource FileSizeConverter}}" />
-
-                                        <TextBlock Grid.Row="1" Grid.Column="0"
-                                                   Style="{StaticResource StatusTextStyle}"
-                                                   TextTrimming="CharacterEllipsis"
-                                                   Text="{Binding Folder}" />
-
-                                        <TextBlock Grid.Row="1" Grid.Column="1"
-                                                   Margin="10,0,0,0"
-                                                   Style="{StaticResource StatusTextStyle}"
-                                                   Text="{Binding ModifiedUtc, Converter={StaticResource LocalTimeConverter}}" />
-                                    </Grid>
-                                </DataTemplate>
-                            </ListBox.ItemTemplate>
                         </ListBox>
 
                         <TextBlock Style="{StaticResource PlaceholderStyle}" Margin="16"

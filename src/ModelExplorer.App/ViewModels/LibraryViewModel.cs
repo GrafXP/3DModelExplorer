@@ -1,8 +1,10 @@
 using System.IO;
+using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Microsoft.Data.Sqlite;
 using Microsoft.Win32;
+using ModelExplorer.App.Thumbnails;
 using ModelExplorer.Indexing;
 
 namespace ModelExplorer.App.ViewModels;
@@ -22,15 +24,17 @@ public sealed partial class LibraryViewModel : ObservableObject
     private const long Megabyte = 1024 * 1024;
 
     private readonly string[] _extensions;
+    private readonly ThumbnailService _thumbnails;
     private IndexService? _index;
     private ModelSearchIndex? _searchIndex;
     private CancellationTokenSource? _scanCancellation;
     private CancellationTokenSource? _searchCancellation;
     private bool _suppressSearch;
 
-    public LibraryViewModel(IReadOnlyList<string> extensions)
+    public LibraryViewModel(IReadOnlyList<string> extensions, ThumbnailService thumbnails)
     {
         _extensions = [.. extensions];
+        _thumbnails = thumbnails;
 
         ExtensionFilters =
         [
@@ -143,6 +147,39 @@ public sealed partial class LibraryViewModel : ObservableObject
     [ObservableProperty]
     private string _resultStatus = "0 results";
 
+    /// <summary>Thumbnail grid rather than the detail list.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsListView))]
+    private bool _isGridView = true;
+
+    public bool IsListView => !IsGridView;
+
+    /// <summary>
+    /// Tile edge in device-independent pixels.
+    /// </summary>
+    /// <remarks>
+    /// Capped at the size thumbnails are rendered, so the grid only ever scales
+    /// them down. Letting a tile grow past it would show a blurred upscale.
+    /// </remarks>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(TileSize))]
+    private double _thumbnailSize = 144;
+
+    public double MinimumThumbnailSize => 88;
+
+    public double MaximumThumbnailSize => ThumbnailService.PixelSize;
+
+    /// <summary>
+    /// The whole tile, thumbnail plus its two-line caption.
+    /// </summary>
+    /// <remarks>
+    /// Given to the wrap panel up front. Told the size, it can work out which
+    /// rows fall inside the viewport arithmetically; left to discover it, it has
+    /// to realize and measure containers to find out, which is the difference
+    /// between scrolling 10k items and paging through them.
+    /// </remarks>
+    public Size TileSize => new(ThumbnailSize + 16, ThumbnailSize + 48);
+
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(AddRootCommand))]
     [NotifyCanExecuteChangedFor(nameof(RescanCommand))]
@@ -242,6 +279,26 @@ public sealed partial class LibraryViewModel : ObservableObject
 
         await _index.RemoveRootAsync(root.Id);
         await ReloadAsync();
+    }
+
+    /// <summary>
+    /// Throws away every rendered thumbnail so they are generated again.
+    /// </summary>
+    /// <remarks>
+    /// Re-running the search is not incidental: it hands the results list a new
+    /// array, which makes the grid rebuild its containers, which is what makes
+    /// the rows on screen ask for their thumbnails again. Without it the visible
+    /// tiles would keep showing images that are no longer cached anywhere.
+    /// </remarks>
+    [RelayCommand]
+    private async Task ClearThumbnailCacheAsync()
+    {
+        var removed = await Task.Run(_thumbnails.ClearCache);
+        await StartSearchAsync(debounce: false);
+
+        ScanStatus = removed == 1
+            ? "Cleared 1 cached thumbnail"
+            : $"Cleared {removed:N0} cached thumbnails";
     }
 
     /// <summary>Drops the folder restriction and shows the whole library again.</summary>

@@ -12,6 +12,7 @@
          bundled e_sqlite3 carries GHSA-2m69-gcr7-jv3q. Referenced directly to
          lift the whole SQLitePCLRaw graph past it; the API is unchanged. -->
     <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="3.0.5" />
+    <PackageReference Include="System.IO.Hashing" Version="10.0.10" />
   </ItemGroup>
 
   <ItemGroup>
