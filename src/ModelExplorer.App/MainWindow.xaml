@@ -561,6 +561,7 @@
                              the search box has focus, so typing "b" would toggle
                              the box. -->
                         <KeyBinding Key="B" Command="{Binding ToggleBoundingBoxCommand}" />
+                        <KeyBinding Key="P" Command="{Binding ToggleBuildPlateCommand}" />
                     </hx:Viewport3DX.InputBindings>
 
                     <hx:AmbientLight3D Color="#FF303338" />
@@ -569,6 +570,43 @@
 
                     <hx:MeshGeometryModel3D Geometry="{Binding Mesh}"
                                             Material="{Binding ModelMaterial}" />
+
+                    <!-- Build plate, drawn under the model as a sense of scale and
+                         a fit check. Three layers: bed surface, 10 mm grid, then
+                         the edge and 50 mm lines over the top. All share one
+                         transform, and none is hit-testable — the plate is wider
+                         than the model, so it would otherwise swallow every
+                         right-click aimed past its silhouette. -->
+                    <hx:MeshGeometryModel3D Geometry="{Binding PlateSurface}"
+                                            Transform="{Binding PlateTransform}"
+                                            Material="{Binding PlateMaterial}"
+                                            IsHitTestVisible="False"
+                                            Visibility="{Binding ShowBuildPlate, Converter={StaticResource BooleanToVisibilityConverter}}" />
+
+                    <hx:LineGeometryModel3D Geometry="{Binding PlateGrid}"
+                                            Transform="{Binding PlateTransform}"
+                                            Color="#FF3C424B"
+                                            Thickness="0.8"
+                                            IsHitTestVisible="False"
+                                            Visibility="{Binding ShowBuildPlate, Converter={StaticResource BooleanToVisibilityConverter}}" />
+
+                    <!-- Two outline models rather than one with a rebound colour,
+                         so both colours stay literals the XAML compiler checks.
+                         Red is the whole point of the plate: it says the model
+                         will not print on the selected machine. -->
+                    <hx:LineGeometryModel3D Geometry="{Binding PlateOutline}"
+                                            Transform="{Binding PlateTransform}"
+                                            Color="#FF6E7A88"
+                                            Thickness="1.2"
+                                            IsHitTestVisible="False"
+                                            Visibility="{Binding ShowsPlateFits, Converter={StaticResource BooleanToVisibilityConverter}}" />
+
+                    <hx:LineGeometryModel3D Geometry="{Binding PlateOutline}"
+                                            Transform="{Binding PlateTransform}"
+                                            Color="#FFE05252"
+                                            Thickness="1.2"
+                                            IsHitTestVisible="False"
+                                            Visibility="{Binding ShowsPlateOverrun, Converter={StaticResource BooleanToVisibilityConverter}}" />
 
                     <!-- Bounding box. Like the pivot marker, never hit-testable:
                          it surrounds the model, so every right-click meant for
@@ -608,15 +646,39 @@
                         BorderBrush="{StaticResource PanelBorderBrush}"
                         BorderThickness="1"
                         Visibility="{Binding HasModel, Converter={StaticResource BooleanToVisibilityConverter}}">
-                    <ToggleButton Style="{StaticResource MaterialDesignActionToggleButton}"
-                                  Width="26" Height="26"
-                                  ToolTip="Show the model's bounding box and its dimensions (B)"
-                                  IsChecked="{Binding ShowBoundingBox}">
-                        <materialDesign:PackIcon Kind="CubeOutline" Width="15" Height="15" />
-                        <materialDesign:ToggleButtonAssist.OnContent>
-                            <materialDesign:PackIcon Kind="CubeScan" Width="15" Height="15" />
-                        </materialDesign:ToggleButtonAssist.OnContent>
-                    </ToggleButton>
+                    <StackPanel Orientation="Horizontal">
+                        <ToggleButton Style="{StaticResource MaterialDesignActionToggleButton}"
+                                      Width="26" Height="26"
+                                      ToolTip="Show the model's bounding box and its dimensions (B)"
+                                      IsChecked="{Binding ShowBoundingBox}">
+                            <materialDesign:PackIcon Kind="CubeOutline" Width="15" Height="15" />
+                            <materialDesign:ToggleButtonAssist.OnContent>
+                                <materialDesign:PackIcon Kind="CubeScan" Width="15" Height="15" />
+                            </materialDesign:ToggleButtonAssist.OnContent>
+                        </ToggleButton>
+
+                        <ToggleButton Style="{StaticResource MaterialDesignActionToggleButton}"
+                                      Width="26" Height="26"
+                                      Margin="6,0,0,0"
+                                      ToolTip="Show a printer's build plate under the model (P)"
+                                      IsChecked="{Binding ShowBuildPlate}">
+                            <materialDesign:PackIcon Kind="Grid" Width="15" Height="15" />
+                            <materialDesign:ToggleButtonAssist.OnContent>
+                                <materialDesign:PackIcon Kind="Printer3d" Width="15" Height="15" />
+                            </materialDesign:ToggleButtonAssist.OnContent>
+                        </ToggleButton>
+
+                        <!-- Appears with the plate rather than sitting there inert:
+                             a printer picker means nothing with no bed on screen. -->
+                        <ComboBox Width="196"
+                                  Margin="8,0,2,0"
+                                  VerticalAlignment="Center"
+                                  ItemsSource="{Binding BuildPlateOptions}"
+                                  SelectedItem="{Binding SelectedBuildPlate}"
+                                  DisplayMemberPath="Label"
+                                  ToolTip="Printer whose build plate is shown"
+                                  Visibility="{Binding ShowBuildPlate, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                    </StackPanel>
                 </Border>
 
                 <!-- Empty state, hidden as soon as geometry exists -->
@@ -732,6 +794,19 @@
                             <materialDesign:PackIcon Kind="FolderSearchOutline" Width="14" Height="14" />
                         </Button>
                     </StackPanel>
+
+                    <!-- Fit verdict sits ahead of the dimensions: when a model does
+                         not print, that is the first thing worth reading. -->
+                    <TextBlock Text="{Binding PlateFitText}"
+                               Style="{StaticResource StatusTextStyle}"
+                               Foreground="{DynamicResource PrimaryHueMidBrush}"
+                               Visibility="{Binding ShowsPlateFits, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                    <TextBlock Text="{Binding PlateFitText}"
+                               Style="{StaticResource StatusTextStyle}"
+                               Foreground="{DynamicResource ValidationErrorBrush}"
+                               Visibility="{Binding ShowsPlateOverrun, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                    <TextBlock Text="  ·  " Style="{StaticResource StatusTextStyle}"
+                               Visibility="{Binding PlateFitText, Converter={StaticResource NonEmptyToVisibilityConverter}}" />
 
                     <TextBlock Text="{Binding DimensionsText}" Style="{StaticResource StatusTextStyle}" />
                     <TextBlock Text="  ·  " Style="{StaticResource StatusTextStyle}"

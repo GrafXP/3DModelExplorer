@@ -66,6 +66,7 @@ public sealed partial class MainViewModel : ObservableObject
         _loads = new GeometryLoadScheduler(_loaders.Load);
         Thumbnails = new ThumbnailService(_loaders, new ThumbnailCache(ThumbnailCache.DefaultDirectory));
         Library = new LibraryViewModel(_loaders.SupportedExtensions, Thumbnails);
+        BuildPlateGeometry(SelectedBuildPlate);
 
         // The library knows nothing about the viewer; the viewer follows it. That
         // keeps the scan/search state machine free of any rendering concern and
@@ -165,6 +166,18 @@ public sealed partial class MainViewModel : ObservableObject
     private float _modelRadius = 1f;
 
     /// <summary>
+    /// Everything the far clip plane has to reach, which is the model alone until
+    /// a build plate is shown around it.
+    /// </summary>
+    private float _sceneRadius = 1f;
+
+    /// <summary>
+    /// The current model's extents, kept so that toggling an overlay or picking a
+    /// different printer can re-derive what it draws without reloading the file.
+    /// </summary>
+    private MxBounds _bounds = MxBounds.Empty;
+
+    /// <summary>
     /// Wireframe cube around the model, showing the extents a slicer would put it
     /// on the plate with.
     /// </summary>
@@ -205,6 +218,84 @@ public sealed partial class MainViewModel : ObservableObject
 
     [RelayCommand]
     private void ToggleBoundingBox() => ShowBoundingBox = !ShowBoundingBox;
+
+    /// <summary>
+    /// A printer's bed drawn under the model, as a sense of scale and a fit check.
+    /// </summary>
+    /// <remarks>
+    /// Placed under the model's own footprint rather than at the world origin.
+    /// Model files put their geometry wherever the exporter left it, so a plate at
+    /// z = 0 would as often as not have the model buried in it or floating above
+    /// it. Centred beneath it is also what a slicer shows after import.
+    /// </remarks>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowsPlateFits))]
+    [NotifyPropertyChangedFor(nameof(ShowsPlateOverrun))]
+    private bool _showBuildPlate;
+
+    public IReadOnlyList<BuildPlate> BuildPlateOptions { get; } = BuildPlates.All;
+
+    [ObservableProperty]
+    private BuildPlate _selectedBuildPlate = BuildPlates.Default;
+
+    /// <summary>Bed surface, 10 mm grid and 50 mm grid, all in plate-local coordinates.</summary>
+    [ObservableProperty]
+    private HxMesh? _plateSurface;
+
+    [ObservableProperty]
+    private LineGeometry3D? _plateGrid;
+
+    [ObservableProperty]
+    private LineGeometry3D? _plateOutline;
+
+    /// <summary>Moves the plate under the model. The geometry itself never moves.</summary>
+    [ObservableProperty]
+    private Transform3D? _plateTransform;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowsPlateFits))]
+    [NotifyPropertyChangedFor(nameof(ShowsPlateOverrun))]
+    private bool _fitsBuildPlate = true;
+
+    /// <summary>
+    /// The outline is drawn by one of two models rather than by one whose colour
+    /// is rebound, so both colours stay literals the XAML compiler checks.
+    /// </summary>
+    public bool ShowsPlateFits => ShowBuildPlate && FitsBuildPlate;
+
+    public bool ShowsPlateOverrun => ShowBuildPlate && !FitsBuildPlate;
+
+    /// <summary>Whether the model would print on the selected machine. Empty when the plate is off.</summary>
+    [ObservableProperty]
+    private string _plateFitText = string.Empty;
+
+    public PhongMaterial PlateMaterial { get; } = new()
+    {
+        DiffuseColor = new Color4(0.15f, 0.16f, 0.19f, 1f),
+        SpecularColor = new Color4(0.05f, 0.05f, 0.06f, 1f),
+        SpecularShininess = 8f,
+        AmbientColor = new Color4(0.06f, 0.07f, 0.08f, 1f),
+    };
+
+    [RelayCommand]
+    private void ToggleBuildPlate() => ShowBuildPlate = !ShowBuildPlate;
+
+    partial void OnSelectedBuildPlateChanged(BuildPlate value)
+    {
+        BuildPlateGeometry(value);
+        UpdatePlateFit();
+        UpdateClipPlanes();
+    }
+
+    partial void OnShowBuildPlateChanged(bool value)
+    {
+        UpdatePlateFit();
+
+        // The plate is far larger than most models, so the far plane has to be
+        // pushed out to reach its far edge — otherwise turning it on over a small
+        // model shows a bed with its back half sliced off.
+        UpdateClipPlanes();
+    }
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasModel))]
@@ -382,7 +473,7 @@ public sealed partial class MainViewModel : ObservableObject
 
         Mesh = geometry;
         FrameModel(bounds);
-        UpdateBoundingBox(bounds);
+        ApplyBounds(bounds);
 
         TriangleCountText = $"{triangles:N0} triangles";
         TimingText = $"parse {parseTime.TotalMilliseconds:N0} ms · build {buildMs:N0} ms";
@@ -402,7 +493,7 @@ public sealed partial class MainViewModel : ObservableObject
     {
         Mesh = null;
         PivotPoint = null;
-        UpdateBoundingBox(MxBounds.Empty);
+        ApplyBounds(MxBounds.Empty);
         HasError = true;
         ErrorMessage = message ?? "The file could not be read.";
         StatusMessage = $"Could not open {ModelName}";
@@ -495,6 +586,17 @@ public sealed partial class MainViewModel : ObservableObject
             return;
         }
 
+        // The near plane still tracks the model — that is what the camera flies
+        // into — but the far plane has to clear whatever else is on screen. A
+        // 256 mm bed under a 20 mm part reaches nine times further than the part.
+        _sceneRadius = _modelRadius;
+        if (ShowBuildPlate)
+        {
+            var plate = SelectedBuildPlate;
+            var half = new System.Numerics.Vector2(plate.Width, plate.Depth).Length() * 0.5f;
+            _sceneRadius = MathF.Max(_sceneRadius, half + _modelRadius);
+        }
+
         var position = Camera.Position;
         var dx = position.X - _modelCentre.X;
         var dy = position.Y - _modelCentre.Y;
@@ -502,7 +604,7 @@ public sealed partial class MainViewModel : ObservableObject
         var distance = Math.Sqrt((dx * dx) + (dy * dy) + (dz * dz));
 
         var near = Math.Max((distance - _modelRadius) * 0.25, _modelRadius * 0.001);
-        var far = Math.Max(distance + (_modelRadius * 3.0), near * 1000.0);
+        var far = Math.Max(distance + (_sceneRadius * 3.0), near * 1000.0);
 
         // Ignore imperceptible changes; otherwise every orbit frame rewrites the
         // projection matrix, and writing the camera back here would re-enter
@@ -539,10 +641,24 @@ public sealed partial class MainViewModel : ObservableObject
     }
 
     /// <summary>
+    /// Re-derives everything drawn around the model — the wireframe box, the
+    /// build plate, and the clip planes that have to reach both.
+    /// </summary>
+    private void ApplyBounds(MxBounds bounds)
+    {
+        _bounds = bounds;
+        UpdateBoundingBox();
+        UpdatePlateTransform();
+        UpdatePlateFit();
+        UpdateClipPlanes();
+    }
+
+    /// <summary>
     /// Fits the wireframe box to the model and writes out its measurements.
     /// </summary>
-    private void UpdateBoundingBox(MxBounds bounds)
+    private void UpdateBoundingBox()
     {
+        var bounds = _bounds;
         if (bounds.IsEmpty)
         {
             BoundingBoxTransform = null;
@@ -603,6 +719,146 @@ public sealed partial class MainViewModel : ObservableObject
                 VerticalAlignment = BillboardVerticalAlignment.Center,
             });
     }
+
+    /// <summary>
+    /// Drops the plate under the model, centred on its footprint.
+    /// </summary>
+    private void UpdatePlateTransform()
+    {
+        if (_bounds.IsEmpty)
+        {
+            PlateTransform = null;
+            return;
+        }
+
+        var centre = _bounds.Center;
+        var transform = new TranslateTransform3D(centre.X, centre.Y, _bounds.Min.Z);
+        transform.Freeze();
+        PlateTransform = transform;
+    }
+
+    /// <summary>
+    /// Answers whether the model would print, and by how much it misses if not.
+    /// </summary>
+    private void UpdatePlateFit()
+    {
+        if (_bounds.IsEmpty || !ShowBuildPlate)
+        {
+            FitsBuildPlate = true;
+            PlateFitText = string.Empty;
+            return;
+        }
+
+        var size = _bounds.Size;
+        var plate = SelectedBuildPlate;
+        FitsBuildPlate = plate.Fits(size);
+
+        PlateFitText = FitsBuildPlate
+            ? $"Fits {plate.Name}"
+            : $"Too large for {plate.Name} — over on {string.Join(", ", plate.Overruns(size))}";
+    }
+
+    /// <summary>
+    /// Rebuilds the bed for a newly selected printer. Local coordinates, centred
+    /// on the origin and lying on z = 0, so placing it is a single translate and
+    /// switching models costs nothing.
+    /// </summary>
+    private void BuildPlateGeometry(BuildPlate plate)
+    {
+        PlateSurface = BuildPlateSurface(plate);
+        PlateGrid = BuildPlateGrid(plate, step: 10f, skip: 50f);
+        PlateOutline = BuildPlateOutline(plate, step: 50f);
+    }
+
+    private static HxMesh BuildPlateSurface(BuildPlate plate)
+    {
+        var hw = plate.Width * 0.5f;
+        var hd = plate.Depth * 0.5f;
+
+        // Just below the grid lines. Coplanar with them the two would z-fight,
+        // and 0.05 mm is far under anything visible at print scale.
+        const float Drop = -0.05f;
+
+        var up = System.Numerics.Vector3.UnitZ;
+        var mesh = new HxMesh
+        {
+            Positions =
+            [
+                new(-hw, -hd, Drop), new(hw, -hd, Drop),
+                new(hw, hd, Drop), new(-hw, hd, Drop),
+            ],
+            Normals = [up, up, up, up],
+            Indices = [0, 1, 2, 0, 2, 3],
+        };
+
+        mesh.UpdateBounds();
+        return mesh;
+    }
+
+    /// <summary>
+    /// Interior grid lines every <paramref name="step"/> mm, leaving out those
+    /// that <see cref="BuildPlateOutline"/> draws brighter.
+    /// </summary>
+    private static LineGeometry3D BuildPlateGrid(BuildPlate plate, float step, float skip)
+    {
+        var builder = new LineBuilder();
+        var hw = plate.Width * 0.5f;
+        var hd = plate.Depth * 0.5f;
+
+        // Counted rather than accumulated: adding a float step repeatedly drifts
+        // enough over 350 mm to put the last line visibly off the grid.
+        for (var i = 1; i * step < plate.Width; i++)
+        {
+            var x = i * step;
+            if (!IsMultipleOf(x, skip))
+            {
+                builder.AddLine(new(x - hw, -hd, 0), new(x - hw, hd, 0));
+            }
+        }
+
+        for (var i = 1; i * step < plate.Depth; i++)
+        {
+            var y = i * step;
+            if (!IsMultipleOf(y, skip))
+            {
+                builder.AddLine(new(-hw, y - hd, 0), new(hw, y - hd, 0));
+            }
+        }
+
+        return builder.ToLineGeometry3D();
+    }
+
+    /// <summary>
+    /// The bed's edge plus its major gridlines. The edge is drawn explicitly
+    /// because a bed is not always a whole number of grid squares across — a
+    /// 210 mm axis has no 50 mm line at its end.
+    /// </summary>
+    private static LineGeometry3D BuildPlateOutline(BuildPlate plate, float step)
+    {
+        var builder = new LineBuilder();
+        var hw = plate.Width * 0.5f;
+        var hd = plate.Depth * 0.5f;
+
+        builder.AddLine(new(-hw, -hd, 0), new(hw, -hd, 0));
+        builder.AddLine(new(hw, -hd, 0), new(hw, hd, 0));
+        builder.AddLine(new(hw, hd, 0), new(-hw, hd, 0));
+        builder.AddLine(new(-hw, hd, 0), new(-hw, -hd, 0));
+
+        for (var i = 1; i * step < plate.Width; i++)
+        {
+            builder.AddLine(new((i * step) - hw, -hd, 0), new((i * step) - hw, hd, 0));
+        }
+
+        for (var i = 1; i * step < plate.Depth; i++)
+        {
+            builder.AddLine(new(-hw, (i * step) - hd, 0), new(hw, (i * step) - hd, 0));
+        }
+
+        return builder.ToLineGeometry3D();
+    }
+
+    private static bool IsMultipleOf(float value, float step) =>
+        step > 0 && MathF.Abs(value % step) < 0.001f;
 
     /// <summary>
     /// Cube of edge 1 centred on the origin, so a scale by the model's size and
