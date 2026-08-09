@@ -65,7 +65,8 @@ public sealed partial class MainViewModel : ObservableObject
 
     public bool HasPivot => PivotTransform is not null;
 
-    /// <summary>Bounding-sphere radius of the current model, for scaling the pivot marker.</summary>
+    /// <summary>Bounding sphere of the current model: drives pivot scale and clip planes.</summary>
+    private System.Numerics.Vector3 _modelCentre;
     private float _modelRadius = 1f;
 
     [ObservableProperty]
@@ -213,6 +214,7 @@ public sealed partial class MainViewModel : ObservableObject
             radius = 1f;
         }
 
+        _modelCentre = centre;
         _modelRadius = radius;
 
         var halfFov = double.DegreesToRadians(Camera.FieldOfView) * 0.5;
@@ -229,8 +231,52 @@ public sealed partial class MainViewModel : ObservableObject
         Camera.Position = new Point3D(eye.X, eye.Y, eye.Z);
         Camera.LookDirection = new Vector3D(direction.X * distance, direction.Y * distance, direction.Z * distance);
         Camera.UpDirection = new Vector3D(0, 0, 1);
-        Camera.NearPlaneDistance = Math.Max(0.01, (distance - (radius * 2)) * 0.5);
-        Camera.FarPlaneDistance = distance + (radius * 4);
+
+        UpdateClipPlanes();
+    }
+
+    /// <summary>
+    /// Recomputes the near and far planes from the camera's current distance to
+    /// the model.
+    /// </summary>
+    /// <remarks>
+    /// Must run on every camera change, not just on load. Fixed clip planes
+    /// derived from the initial framing distance stay put while the wheel moves
+    /// the camera closer, so zooming in eventually pushes surfaces through the
+    /// near plane and slices the model open.
+    ///
+    /// The near plane is a fraction of the distance to the model's near surface
+    /// and collapses to a small fraction of the model's own size once the camera
+    /// is inside the bounding sphere. Far is kept within ~1000x of near so depth
+    /// precision stays sufficient to avoid z-fighting.
+    /// </remarks>
+    public void UpdateClipPlanes()
+    {
+        if (_modelRadius <= 0)
+        {
+            return;
+        }
+
+        var position = Camera.Position;
+        var dx = position.X - _modelCentre.X;
+        var dy = position.Y - _modelCentre.Y;
+        var dz = position.Z - _modelCentre.Z;
+        var distance = Math.Sqrt((dx * dx) + (dy * dy) + (dz * dz));
+
+        var near = Math.Max((distance - _modelRadius) * 0.25, _modelRadius * 0.001);
+        var far = Math.Max(distance + (_modelRadius * 3.0), near * 1000.0);
+
+        // Ignore imperceptible changes; otherwise every orbit frame rewrites the
+        // projection matrix, and writing the camera back here would re-enter
+        // through CameraChanged.
+        if (Math.Abs(Camera.NearPlaneDistance - near) <= near * 0.02 &&
+            Math.Abs(Camera.FarPlaneDistance - far) <= far * 0.02)
+        {
+            return;
+        }
+
+        Camera.NearPlaneDistance = near;
+        Camera.FarPlaneDistance = far;
     }
 
     /// <summary>

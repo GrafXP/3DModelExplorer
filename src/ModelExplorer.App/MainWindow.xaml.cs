@@ -26,6 +26,10 @@ public partial class MainWindow : Window
         InitializeComponent();
 
         Loaded += OnWindowLoaded;
+
+        // Clip planes track the camera, so they have to be recomputed on every
+        // camera change rather than only when a model is loaded.
+        Viewport.CameraChanged += (_, _) => ViewModel?.UpdateClipPlanes();
     }
 
     private async void OnWindowLoaded(object sender, RoutedEventArgs e)
