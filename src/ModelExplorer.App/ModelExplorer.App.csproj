@@ -10,6 +10,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="HelixToolkit.Wpf.SharpDX" Version="3.1.2" />
     <PackageReference Include="MaterialDesignThemes" Version="5.3.2" />
     <PackageReference Include="MaterialDesignColors" Version="5.3.2" />
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />

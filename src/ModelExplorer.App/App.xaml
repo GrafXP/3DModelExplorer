@@ -11,6 +11,10 @@
                 <ResourceDictionary Source="pack://application:,,,/MaterialDesignThemes.Wpf;component/Themes/MaterialDesign3.Defaults.xaml" />
             </ResourceDictionary.MergedDictionaries>
 
+            <BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter" />
+            <local:InverseBooleanToVisibilityConverter x:Key="InverseBooleanToVisibilityConverter" />
+            <local:NonEmptyToVisibilityConverter x:Key="NonEmptyToVisibilityConverter" />
+
             <!-- Surfaces. Deliberately darker than the Material default paper so a
                  rendered model reads as the brightest thing on screen. -->
             <SolidColorBrush x:Key="ViewportBackgroundBrush" Color="#FF1A1A1A" />

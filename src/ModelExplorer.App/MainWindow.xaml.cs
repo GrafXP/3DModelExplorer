@@ -1,6 +1,11 @@
+using System.IO;
 using System.Runtime.InteropServices;
 using System.Windows;
+using System.Windows.Input;
 using System.Windows.Interop;
+using System.Windows.Media.Media3D;
+using HelixToolkit.Wpf.SharpDX;
+using ModelExplorer.App.ViewModels;
 
 namespace ModelExplorer.App;
 
@@ -19,12 +24,93 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+
+        Loaded += OnWindowLoaded;
     }
+
+    private async void OnWindowLoaded(object sender, RoutedEventArgs e)
+    {
+        if (App.StartupFile is { } path && ViewModel is { } viewModel)
+        {
+            await viewModel.LoadAsync(path);
+        }
+    }
+
+    private MainViewModel? ViewModel => DataContext as MainViewModel;
 
     protected override void OnSourceInitialized(EventArgs e)
     {
         base.OnSourceInitialized(e);
         ApplyDarkTitleBar();
+    }
+
+    /// <summary>
+    /// Right-click picks a point on the model and makes it the orbit centre.
+    /// Right-clicking empty space clears it, returning the pivot to the model
+    /// centre. Without this, orbiting a large print always swings around its
+    /// bounding-box centre, which is useless when inspecting one corner of it.
+    /// </summary>
+    private void OnViewportRightButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (ViewModel is not { } viewModel)
+        {
+            return;
+        }
+
+        var hits = Viewport.FindHits(e.GetPosition(Viewport));
+
+        // FindHits returns front-to-back, but sort defensively rather than
+        // trusting the order — picking the far side of a model would be worse
+        // than a marginally slower right-click.
+        var nearest = hits
+            .Where(h => h.IsValid)
+            .OrderBy(h => h.Distance)
+            .FirstOrDefault();
+
+        if (nearest is null)
+        {
+            Viewport.FixedRotationPointEnabled = false;
+            viewModel.ClearPivot();
+            e.Handled = true;
+            return;
+        }
+
+        var p = nearest.PointHit;
+        Viewport.FixedRotationPoint = new Point3D(p.X, p.Y, p.Z);
+        Viewport.FixedRotationPointEnabled = true;
+        viewModel.SetPivot(p.X, p.Y, p.Z);
+        e.Handled = true;
+    }
+
+    private void OnDragOver(object sender, DragEventArgs e)
+    {
+        e.Effects = TryGetDroppedModel(e) is not null ? DragDropEffects.Copy : DragDropEffects.None;
+        e.Handled = true;
+    }
+
+    private async void OnFileDropped(object sender, DragEventArgs e)
+    {
+        if (TryGetDroppedModel(e) is { } path && ViewModel is { } viewModel)
+        {
+            e.Handled = true;
+            await viewModel.LoadAsync(path);
+        }
+    }
+
+    private static string? TryGetDroppedModel(DragEventArgs e)
+    {
+        if (!e.Data.GetDataPresent(DataFormats.FileDrop))
+        {
+            return null;
+        }
+
+        if (e.Data.GetData(DataFormats.FileDrop) is not string[] paths)
+        {
+            return null;
+        }
+
+        return paths.FirstOrDefault(p =>
+            Path.GetExtension(p.AsSpan()).Equals(".stl", StringComparison.OrdinalIgnoreCase));
     }
 
     /// <summary>
