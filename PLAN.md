@@ -108,7 +108,7 @@ HelixToolkit 3.1.2 turns out to have no windowless offscreen render path — `Re
 
 > **Gate:** Clear the thumbnail cache and scroll fast through 10k+ models. Scrolling stays smooth while thumbnails fill in, and the ones under your cursor render before off-screen ones. Restart the app — thumbnails appear instantly from cache.
 
-### Step 6.5 — Result ordering and bounding box
+### Step 6.5 — Result ordering, bounding box and build plate
 
 Interim work, slotted in after gate 6 passed.
 
@@ -130,9 +130,24 @@ print is most often checked against. One unit cube placed by a scale and a
 translate, like the pivot marker, rather than new line geometry per model. Toggle
 in a viewport overlay or `B` while the viewport has focus.
 
+**Build plate.** A toggleable printer bed under the model, centred beneath its
+actual bounds so models retain the position stored by their exporter. The default
+is the Bambu Lab X1C / P1S profile (256 × 256 × 250 mm), with a deliberately short
+printer picker whose usable volumes come from slicer profiles. The surface, 10 mm
+grid and 50 mm outline share one transform; changing models only translates them,
+while changing printer rebuilds the plate-local geometry once. The status bar
+reports whether the model fits and lists every exceeded axis, worst first; the
+outline turns red on an overrun. Toggle in the viewport overlay or `P` while the
+viewport has focus. When visible, the plate contributes to the far clip plane so
+a large bed is not sliced away behind a small model.
+
 > **Gate:** Sort a full library by each field and confirm the order and that the
 > results keep pace with typing. Toggle the box on a model whose bounds you know
-> — the labels must match what your slicer reports.
+> — the labels must match what your slicer reports. Load a model you know exceeds
+> the selected printer and confirm the plate outline turns red and the status bar
+> names the right axes and amounts. Switch printers with that model loaded, then
+> load a 10–20 mm model and confirm the far edge of the bed remains visible. `P`
+> must toggle the plate only while the viewport has focus.
 
 ### Step 7 — Incremental rescan and live updates
 
