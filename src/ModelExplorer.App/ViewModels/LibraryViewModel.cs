@@ -65,7 +65,17 @@ public sealed partial class LibraryViewModel : ObservableObject
     [ObservableProperty]
     private string _scanStatus = string.Empty;
 
+    /// <summary>
+    /// False until the index is open. Every command's CanExecute reads it, so it
+    /// has to re-raise them exactly like <see cref="IsScanning"/> does — a
+    /// CanExecute that depends on a property nobody notifies about latches at
+    /// whatever it evaluated to when the binding was first made, which here is
+    /// disabled, forever.
+    /// </summary>
     [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(AddRootCommand))]
+    [NotifyCanExecuteChangedFor(nameof(RescanCommand))]
+    [NotifyCanExecuteChangedFor(nameof(RemoveRootCommand))]
     private bool _isReady;
 
     /// <summary>
