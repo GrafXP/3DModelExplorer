@@ -565,11 +565,22 @@
                         <KeyBinding Key="B" Command="{Binding ToggleBoundingBoxCommand}" />
                         <KeyBinding Key="P" Command="{Binding ToggleBuildPlateCommand}" />
                         <KeyBinding Key="C" Command="{Binding ToggleCutPlaneCommand}" />
+                        <KeyBinding Key="A" Command="{Binding ToggleAppearanceOptionsCommand}" />
                     </hx:Viewport3DX.InputBindings>
 
-                    <hx:AmbientLight3D Color="#FF303338" />
-                    <hx:DirectionalLight3D Direction="-0.6,-0.8,-0.9" Color="#FFFFFFFF" />
-                    <hx:DirectionalLight3D Direction="0.8,0.4,0.35" Color="#FF585C64" />
+                    <!-- A configurable main/fill/rim rig. Ambient remains a
+                         separate control so dark faces can be lifted without
+                         washing out the directional shape cues. -->
+                    <hx:AmbientLight3D Color="{Binding AmbientLightColor}" />
+                    <hx:DirectionalLight3D Direction="{Binding MainLightDirection}"
+                                           Color="{Binding MainLightColor}"
+                                           IsRendering="{Binding MainLightEnabled}" />
+                    <hx:DirectionalLight3D Direction="{Binding FillLightDirection}"
+                                           Color="{Binding FillLightColor}"
+                                           IsRendering="{Binding FillLightEnabled}" />
+                    <hx:DirectionalLight3D Direction="{Binding RimLightDirection}"
+                                           Color="{Binding RimLightColor}"
+                                           IsRendering="{Binding RimLightEnabled}" />
 
                     <!-- The committed model is either the untouched source or a
                          real CPU-generated cut with cap triangles. During handle
@@ -579,11 +590,17 @@
                     <hx:MeshGeometryModel3D x:Name="CommittedModel"
                                             Geometry="{Binding Mesh}"
                                             Material="{Binding ModelMaterial}"
+                                            FillMode="{Binding ModelFillMode}"
+                                            RenderWireframe="{Binding RenderModelEdges}"
+                                            WireframeColor="{Binding ModelWireframeColor}"
                                             Visibility="{Binding ShowsCommittedModel, Converter={StaticResource BooleanToVisibilityConverter}}" />
 
                     <hx:CrossSectionMeshGeometryModel3D x:Name="CutPreviewModel"
                                                         Geometry="{Binding OriginalMesh}"
                                                         Material="{Binding ModelMaterial}"
+                                                        FillMode="{Binding ModelFillMode}"
+                                                        RenderWireframe="{Binding RenderModelEdges}"
+                                                        WireframeColor="{Binding ModelWireframeColor}"
                                                         EnablePlane1="True"
                                                         Plane1="{Binding CutPlane}"
                                                         CuttingOperation="Intersect"
@@ -740,6 +757,14 @@
                                 <materialDesign:PackIcon Kind="BoxCutter" Width="15" Height="15" />
                             </ToggleButton>
 
+                            <ToggleButton Style="{StaticResource MaterialDesignActionToggleButton}"
+                                          Width="26" Height="26"
+                                          Margin="6,0,0,0"
+                                          ToolTip="Lighting, shading and model colour (A)"
+                                          IsChecked="{Binding ShowAppearanceOptions}">
+                                <materialDesign:PackIcon Kind="PaletteOutline" Width="15" Height="15" />
+                            </ToggleButton>
+
                             <Button Style="{StaticResource MaterialDesignToolButton}"
                                     Width="26" Height="26" Padding="0"
                                     Margin="4,0,0,0"
@@ -775,6 +800,120 @@
                                    Text="{Binding CutPlaneStatusText}"
                                    TextTrimming="CharacterEllipsis"
                                    Visibility="{Binding ShowCutPlane, Converter={StaticResource BooleanToVisibilityConverter}}" />
+
+                        <Border Width="326"
+                                Margin="3,5,3,3"
+                                Padding="9,7,9,9"
+                                CornerRadius="3"
+                                Background="#B8181818"
+                                BorderBrush="{StaticResource PanelBorderBrush}"
+                                BorderThickness="1"
+                                Visibility="{Binding ShowAppearanceOptions, Converter={StaticResource BooleanToVisibilityConverter}}">
+                            <StackPanel>
+                                <TextBlock Text="LIGHTING &amp; APPEARANCE"
+                                           Style="{StaticResource PanelHeaderStyle}"
+                                           Margin="0,0,0,6" />
+
+                                <ComboBox ItemsSource="{Binding LightingOptions}"
+                                          SelectedItem="{Binding SelectedLightingPreset}"
+                                          DisplayMemberPath="Name"
+                                          materialDesign:HintAssist.Hint="Lighting preset" />
+
+                                <StackPanel Orientation="Horizontal" Margin="0,7,0,2">
+                                    <TextBlock Text="Directional lights"
+                                               Width="112"
+                                               VerticalAlignment="Center"
+                                               Foreground="{StaticResource TextMutedBrush}" />
+                                    <CheckBox Content="Main"
+                                              IsChecked="{Binding MainLightEnabled}"
+                                              Margin="0,0,9,0" />
+                                    <CheckBox Content="Fill"
+                                              IsChecked="{Binding FillLightEnabled}"
+                                              Margin="0,0,9,0" />
+                                    <CheckBox Content="Rim"
+                                              IsChecked="{Binding RimLightEnabled}" />
+                                </StackPanel>
+
+                                <Grid Margin="0,3,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="112" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="42" />
+                                    </Grid.ColumnDefinitions>
+                                    <CheckBox Grid.Column="0"
+                                              Content="Ambient"
+                                              VerticalAlignment="Center"
+                                              IsChecked="{Binding AmbientLightEnabled}" />
+                                    <Slider Grid.Column="1"
+                                            Margin="4,0,8,0"
+                                            VerticalAlignment="Center"
+                                            Minimum="0" Maximum="1"
+                                            IsEnabled="{Binding AmbientLightEnabled}"
+                                            Value="{Binding AmbientLightIntensity}" />
+                                    <TextBlock Grid.Column="2"
+                                               HorizontalAlignment="Right"
+                                               VerticalAlignment="Center"
+                                               Foreground="{StaticResource TextMutedBrush}"
+                                               Text="{Binding AmbientLightIntensity, StringFormat={}{0:P0}}" />
+                                </Grid>
+
+                                <Grid Margin="0,3,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="112" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="50" />
+                                    </Grid.ColumnDefinitions>
+                                    <CheckBox Grid.Column="0"
+                                              Content="Rotate main"
+                                              VerticalAlignment="Center"
+                                              IsChecked="{Binding AutoRotateLight}" />
+                                    <Slider Grid.Column="1"
+                                            Margin="4,0,8,0"
+                                            VerticalAlignment="Center"
+                                            Minimum="10" Maximum="120"
+                                            IsEnabled="{Binding AutoRotateLight}"
+                                            Value="{Binding LightRotationSpeed}" />
+                                    <TextBlock Grid.Column="2"
+                                               HorizontalAlignment="Right"
+                                               VerticalAlignment="Center"
+                                               Foreground="{StaticResource TextMutedBrush}"
+                                               Text="{Binding LightRotationSpeed, StringFormat={}{0:N0}°/s}" />
+                                </Grid>
+
+                                <Grid Margin="0,8,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="8" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+
+                                    <ComboBox Grid.Column="0"
+                                              ItemsSource="{Binding ShadingOptions}"
+                                              SelectedItem="{Binding SelectedShading}"
+                                              DisplayMemberPath="Name"
+                                              materialDesign:HintAssist.Hint="Shading" />
+
+                                    <ComboBox Grid.Column="2"
+                                              ItemsSource="{Binding ModelColorOptions}"
+                                              SelectedItem="{Binding SelectedModelColor}"
+                                              materialDesign:HintAssist.Hint="Model colour">
+                                        <ComboBox.ItemTemplate>
+                                            <DataTemplate>
+                                                <StackPanel Orientation="Horizontal">
+                                                    <Border Width="13" Height="13"
+                                                            Margin="0,0,7,0"
+                                                            CornerRadius="2"
+                                                            Background="{Binding Swatch}"
+                                                            BorderBrush="#66FFFFFF"
+                                                            BorderThickness="1" />
+                                                    <TextBlock Text="{Binding Name}" />
+                                                </StackPanel>
+                                            </DataTemplate>
+                                        </ComboBox.ItemTemplate>
+                                    </ComboBox>
+                                </Grid>
+                            </StackPanel>
+                        </Border>
                     </StackPanel>
                 </Border>
 

@@ -4,6 +4,7 @@ using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Interop;
+using System.Windows.Media;
 using System.Windows.Threading;
 using HelixToolkit.Wpf.SharpDX;
 using ModelExplorer.App.ViewModels;
@@ -20,6 +21,7 @@ public partial class MainWindow : Window
     private const int DwmwaUseImmersiveDarkModeLegacy = 19;
     private bool _isCutPlanePointerDown;
     private bool _wasViewportInertiaEnabled;
+    private bool _isRotatingLightSubscribed;
 
     [DllImport("dwmapi.dll", PreserveSig = true)]
     private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int size);
@@ -45,6 +47,38 @@ public partial class MainWindow : Window
         if (e.PropertyName == nameof(MainViewModel.PivotPoint))
         {
             SyncRotationPoint();
+        }
+        else if (e.PropertyName == nameof(MainViewModel.AutoRotateLight))
+        {
+            SyncRotatingLightSubscription();
+        }
+    }
+
+    private void SyncRotatingLightSubscription()
+    {
+        var shouldSubscribe = ViewModel?.AutoRotateLight == true;
+        if (shouldSubscribe == _isRotatingLightSubscribed)
+        {
+            return;
+        }
+
+        if (shouldSubscribe)
+        {
+            CompositionTarget.Rendering += OnRendering;
+        }
+        else
+        {
+            CompositionTarget.Rendering -= OnRendering;
+        }
+
+        _isRotatingLightSubscribed = shouldSubscribe;
+    }
+
+    private void OnRendering(object? sender, EventArgs e)
+    {
+        if (e is RenderingEventArgs rendering)
+        {
+            ViewModel?.UpdateRotatingLight(rendering.RenderingTime);
         }
     }
 
@@ -78,6 +112,8 @@ public partial class MainWindow : Window
             return;
         }
 
+        SyncRotatingLightSubscription();
+
         // The index is opened and read after the window is up, so a slow disk
         // delays the list rather than the first frame.
         await viewModel.Library.InitializeAsync();
@@ -103,8 +139,19 @@ public partial class MainWindow : Window
     /// </summary>
     protected override void OnClosed(EventArgs e)
     {
-        ViewModel?.StopCutPlaneWork();
-        ViewModel?.Thumbnails.Dispose();
+        if (_isRotatingLightSubscribed)
+        {
+            CompositionTarget.Rendering -= OnRendering;
+            _isRotatingLightSubscribed = false;
+        }
+
+        if (ViewModel is { } viewModel)
+        {
+            viewModel.PropertyChanged -= OnViewModelPropertyChanged;
+            viewModel.StopCutPlaneWork();
+            viewModel.Thumbnails.Dispose();
+        }
+
         base.OnClosed(e);
     }
 

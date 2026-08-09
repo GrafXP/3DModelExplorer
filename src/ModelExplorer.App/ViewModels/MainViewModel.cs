@@ -19,6 +19,7 @@ using ModelExplorer.Indexing;
 using HxCamera = HelixToolkit.Wpf.SharpDX.PerspectiveCamera;
 using HxMesh = HelixToolkit.SharpDX.MeshGeometry3D;
 using MxBounds = ModelExplorer.Geometry.BoundingBox;
+using MediaColor = System.Windows.Media.Color;
 using NumericsPlane = System.Numerics.Plane;
 using NumericsVector3 = System.Numerics.Vector3;
 
@@ -56,6 +57,9 @@ public sealed partial class MainViewModel : ObservableObject
     private string _sourceTimingText = string.Empty;
     private bool _keepPositiveCutSide = true;
     private bool _isConfiguringCutPlane;
+    private NumericsVector3 _orbitLightBaseDirection;
+    private double _lightOrbitAngle;
+    private TimeSpan? _lastLightFrame;
 
     /// <summary>
     /// Incremented on every accepted request. The scheduler already guarantees
@@ -83,6 +87,8 @@ public sealed partial class MainViewModel : ObservableObject
         Thumbnails = new ThumbnailService(_loaders, new ThumbnailCache(ThumbnailCache.DefaultDirectory));
         Library = new LibraryViewModel(_loaders.SupportedExtensions, Thumbnails);
         BuildPlateGeometry(SelectedBuildPlate);
+        ApplyLightingPreset(SelectedLightingPreset);
+        ApplyModelAppearance();
 
         // The library knows nothing about the viewer; the viewer follows it. That
         // keeps the scan/search state machine free of any rendering concern and
@@ -127,6 +133,171 @@ public sealed partial class MainViewModel : ObservableObject
         SpecularShininess = 24f,
         AmbientColor = new Color4(0.10f, 0.11f, 0.13f, 1f),
     };
+
+    /// <summary>Whether the viewport's compact lighting/material panel is open.</summary>
+    [ObservableProperty]
+    private bool _showAppearanceOptions;
+
+    [RelayCommand]
+    private void ToggleAppearanceOptions() => ShowAppearanceOptions = !ShowAppearanceOptions;
+
+    public IReadOnlyList<LightingPreset> LightingOptions { get; } = LightingPresets.All;
+
+    [ObservableProperty]
+    private LightingPreset _selectedLightingPreset = LightingPresets.Default;
+
+    /// <summary>
+    /// Ambient light is independent of the directional rig so a user can lift
+    /// shadowed faces without flattening the chosen key/fill arrangement.
+    /// </summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(AmbientLightColor))]
+    private bool _ambientLightEnabled = true;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(AmbientLightColor))]
+    private double _ambientLightIntensity = 0.42;
+
+    public MediaColor AmbientLightColor => AmbientLightEnabled
+        ? ScaleColor(236, 241, 250, AmbientLightIntensity)
+        : MediaColor.FromRgb(0, 0, 0);
+
+    [ObservableProperty]
+    private Vector3D _mainLightDirection;
+
+    [ObservableProperty]
+    private Vector3D _fillLightDirection;
+
+    [ObservableProperty]
+    private Vector3D _rimLightDirection;
+
+    [ObservableProperty]
+    private MediaColor _mainLightColor;
+
+    [ObservableProperty]
+    private MediaColor _fillLightColor;
+
+    [ObservableProperty]
+    private MediaColor _rimLightColor;
+
+    [ObservableProperty]
+    private bool _mainLightEnabled = true;
+
+    [ObservableProperty]
+    private bool _fillLightEnabled = true;
+
+    [ObservableProperty]
+    private bool _rimLightEnabled = true;
+
+    /// <summary>Continuously orbits the main directional light around world Z.</summary>
+    [ObservableProperty]
+    private bool _autoRotateLight;
+
+    [ObservableProperty]
+    private double _lightRotationSpeed = 35;
+
+    public IReadOnlyList<ShadingOption> ShadingOptions { get; } = global::ModelExplorer.App.ShadingOptions.All;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ModelFillMode))]
+    [NotifyPropertyChangedFor(nameof(RenderModelEdges))]
+    private ShadingOption _selectedShading = global::ModelExplorer.App.ShadingOptions.Default;
+
+    public global::SharpDX.Direct3D11.FillMode ModelFillMode => SelectedShading.FillMode;
+
+    public bool RenderModelEdges => SelectedShading.RenderEdges;
+
+    public IReadOnlyList<ModelColorOption> ModelColorOptions { get; } = ModelColors.All;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ModelWireframeColor))]
+    private ModelColorOption _selectedModelColor = ModelColors.Default;
+
+    /// <summary>Brightened material colour so edges remain legible on the dark viewport.</summary>
+    public MediaColor ModelWireframeColor => MediaColor.FromRgb(
+        Brighten(SelectedModelColor.Red),
+        Brighten(SelectedModelColor.Green),
+        Brighten(SelectedModelColor.Blue));
+
+    partial void OnSelectedLightingPresetChanged(LightingPreset value) => ApplyLightingPreset(value);
+
+    partial void OnAutoRotateLightChanged(bool value)
+    {
+        _lastLightFrame = null;
+        _lightOrbitAngle = 0;
+        MainLightDirection = ToVector3D(_orbitLightBaseDirection);
+    }
+
+    partial void OnSelectedShadingChanged(ShadingOption value) => ApplyModelAppearance();
+
+    partial void OnSelectedModelColorChanged(ModelColorOption value) => ApplyModelAppearance();
+
+    private void ApplyLightingPreset(LightingPreset preset)
+    {
+        _orbitLightBaseDirection = preset.Main.Direction;
+        _lightOrbitAngle = 0;
+        _lastLightFrame = null;
+
+        MainLightDirection = ToVector3D(preset.Main.Direction);
+        FillLightDirection = ToVector3D(preset.Fill.Direction);
+        RimLightDirection = ToVector3D(preset.Rim.Direction);
+        MainLightColor = ToMediaColor(preset.Main);
+        FillLightColor = ToMediaColor(preset.Fill);
+        RimLightColor = ToMediaColor(preset.Rim);
+    }
+
+    /// <summary>
+    /// Advances the orbit from WPF's render clock. Frame time, rather than a UI
+    /// timer, keeps rotation smooth without asking Helix to redraw while hidden.
+    /// </summary>
+    public void UpdateRotatingLight(TimeSpan renderingTime)
+    {
+        if (!AutoRotateLight)
+        {
+            return;
+        }
+
+        if (_lastLightFrame is { } previous)
+        {
+            // A debugger pause must not turn into a large, disorienting jump.
+            var elapsedSeconds = Math.Clamp((renderingTime - previous).TotalSeconds, 0, 0.1);
+            _lightOrbitAngle += elapsedSeconds * LightRotationSpeed * Math.PI / 180;
+            _lightOrbitAngle %= Math.Tau;
+            MainLightDirection = ToVector3D(
+                LightingPresets.OrbitDirection(_orbitLightBaseDirection, _lightOrbitAngle));
+        }
+
+        _lastLightFrame = renderingTime;
+    }
+
+    private void ApplyModelAppearance()
+    {
+        var colour = SelectedModelColor;
+        var red = colour.Red / 255f;
+        var green = colour.Green / 255f;
+        var blue = colour.Blue / 255f;
+        var specular = SelectedShading.SpecularStrength;
+
+        ModelMaterial.DiffuseColor = new Color4(red, green, blue, 1f);
+        ModelMaterial.AmbientColor = new Color4(red * 0.34f, green * 0.34f, blue * 0.34f, 1f);
+        ModelMaterial.SpecularColor = new Color4(specular, specular, specular, 1f);
+        ModelMaterial.SpecularShininess = SelectedShading.Shininess;
+        ModelMaterial.EnableFlatShading = SelectedShading.FlatShading;
+    }
+
+    private static Vector3D ToVector3D(NumericsVector3 value) =>
+        new(value.X, value.Y, value.Z);
+
+    private static MediaColor ToMediaColor(DirectionalLightOption light) =>
+        ScaleColor(light.Red, light.Green, light.Blue, light.Strength);
+
+    private static MediaColor ScaleColor(byte red, byte green, byte blue, double strength) =>
+        MediaColor.FromRgb(
+            (byte)Math.Clamp(Math.Round(red * strength), 0, 255),
+            (byte)Math.Clamp(Math.Round(green * strength), 0, 255),
+            (byte)Math.Clamp(Math.Round(blue * strength), 0, 255));
+
+    private static byte Brighten(byte channel) => (byte)(128 + channel / 2);
 
     /// <summary>Emissive so the pivot stays legible even on an unlit face.</summary>
     public PhongMaterial PivotMaterial { get; } = new()
