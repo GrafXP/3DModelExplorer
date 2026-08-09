@@ -4,6 +4,7 @@ using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Interop;
+using System.Windows.Threading;
 using HelixToolkit.Wpf.SharpDX;
 using ModelExplorer.App.ViewModels;
 
@@ -17,6 +18,8 @@ public partial class MainWindow : Window
     // Win10 20H1 and later. Earlier builds used 19 for the same attribute.
     private const int DwmwaUseImmersiveDarkMode = 20;
     private const int DwmwaUseImmersiveDarkModeLegacy = 19;
+    private bool _isCutPlanePointerDown;
+    private bool _wasViewportInertiaEnabled;
 
     [DllImport("dwmapi.dll", PreserveSig = true)]
     private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int size);
@@ -100,8 +103,55 @@ public partial class MainWindow : Window
     /// </summary>
     protected override void OnClosed(EventArgs e)
     {
+        ViewModel?.StopCutPlaneWork();
         ViewModel?.Thumbnails.Dispose();
         base.OnClosed(e);
+    }
+
+    private void OnViewportPreviewLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (ViewModel is not { ShowCutPlane: true } viewModel)
+        {
+            return;
+        }
+
+        var hits = Viewport.FindHits(e.GetPosition(Viewport));
+        if (!hits.Any(hit => hit.IsValid && hit.ModelHit is UIManipulator3D))
+        {
+            return;
+        }
+
+        // This preview event runs before the viewport's LeftClick rotate command.
+        // The 3D handle still receives the unhandled event, while the camera
+        // controller sees rotation disabled for the duration of the drag.
+        _isCutPlanePointerDown = true;
+        _wasViewportInertiaEnabled = Viewport.IsInertiaEnabled;
+        Viewport.StopSpin();
+        Viewport.IsInertiaEnabled = false;
+        Viewport.IsRotationEnabled = false;
+        viewModel.BeginCutPlaneManipulation();
+    }
+
+    private void OnViewportPreviewLeftButtonUp(object sender, MouseButtonEventArgs e)
+    {
+        if (!_isCutPlanePointerDown)
+        {
+            return;
+        }
+
+        _isCutPlanePointerDown = false;
+        ViewModel?.EndCutPlaneManipulation();
+        Viewport.StopSpin();
+
+        // Keep the camera disabled through the bubbling MouseUp event; restoring
+        // it in this preview handler lets the rotate command turn the handle's
+        // drag velocity into camera inertia after release.
+        Dispatcher.BeginInvoke(new Action(() =>
+        {
+            Viewport.IsRotationEnabled = true;
+            Viewport.IsInertiaEnabled = _wasViewportInertiaEnabled;
+            Viewport.StopSpin();
+        }), DispatcherPriority.Background);
     }
 
     /// <summary>
@@ -123,7 +173,9 @@ public partial class MainWindow : Window
         // trusting the order — picking the far side of a model would be worse
         // than a marginally slower right-click.
         var nearest = hits
-            .Where(h => h.IsValid)
+            .Where(h => h.IsValid &&
+                        (ReferenceEquals(h.ModelHit, CommittedModel) ||
+                         ReferenceEquals(h.ModelHit, CutPreviewModel)))
             .OrderBy(h => h.Distance)
             .FirstOrDefault();
 
