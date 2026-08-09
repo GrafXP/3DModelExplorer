@@ -164,6 +164,48 @@ public sealed partial class MainViewModel : ObservableObject
     private System.Numerics.Vector3 _modelCentre;
     private float _modelRadius = 1f;
 
+    /// <summary>
+    /// Wireframe cube around the model, showing the extents a slicer would put it
+    /// on the plate with.
+    /// </summary>
+    /// <remarks>
+    /// Off by default. It is an inspection aid, not part of looking at a model,
+    /// and twelve bright lines around every print would compete with the print.
+    /// </remarks>
+    [ObservableProperty]
+    private bool _showBoundingBox;
+
+    /// <summary>
+    /// A unit cube built once, placed by <see cref="BoundingBoxTransform"/>.
+    /// </summary>
+    /// <remarks>
+    /// Same reasoning as the pivot marker: rebuilding twelve lines per model
+    /// would hand the renderer a new vertex buffer on every selection change, for
+    /// geometry that only ever differs by a scale and an offset.
+    /// </remarks>
+    public LineGeometry3D BoundingBoxGeometry { get; } = BuildUnitBox();
+
+    /// <summary>Scales and places the unit cube. Null when there is no geometry.</summary>
+    [ObservableProperty]
+    private Transform3D? _boundingBoxTransform;
+
+    /// <summary>
+    /// Measurements pinned to the three edges meeting at the corner nearest the
+    /// default camera, so the numbers are readable without orbiting first.
+    /// </summary>
+    [ObservableProperty]
+    private BillboardText3D? _boundingBoxLabels;
+
+    /// <summary>
+    /// The model's extents, always shown in the status bar once a model is open
+    /// — the one number a print is most often checked against.
+    /// </summary>
+    [ObservableProperty]
+    private string _dimensionsText = string.Empty;
+
+    [RelayCommand]
+    private void ToggleBoundingBox() => ShowBoundingBox = !ShowBoundingBox;
+
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasModel))]
     [NotifyPropertyChangedFor(nameof(ShowEmptyState))]
@@ -340,13 +382,15 @@ public sealed partial class MainViewModel : ObservableObject
 
         Mesh = geometry;
         FrameModel(bounds);
+        UpdateBoundingBox(bounds);
 
-        var size = bounds.Size;
         TriangleCountText = $"{triangles:N0} triangles";
         TimingText = $"parse {parseTime.TotalMilliseconds:N0} ms · build {buildMs:N0} ms";
-        StatusMessage = triangles == 0
-            ? $"{ModelName} contains no geometry"
-            : $"{ModelName}  ·  {size.X:N1} × {size.Y:N1} × {size.Z:N1} mm";
+
+        // Dimensions used to be appended here; they have their own status-bar
+        // slot now, kept in step with the bounding box, so repeating them would
+        // just be the same numbers twice on one line.
+        StatusMessage = triangles == 0 ? $"{ModelName} contains no geometry" : ModelName;
     }
 
     /// <summary>
@@ -358,6 +402,7 @@ public sealed partial class MainViewModel : ObservableObject
     {
         Mesh = null;
         PivotPoint = null;
+        UpdateBoundingBox(MxBounds.Empty);
         HasError = true;
         ErrorMessage = message ?? "The file could not be read.";
         StatusMessage = $"Could not open {ModelName}";
@@ -491,6 +536,83 @@ public sealed partial class MainViewModel : ObservableObject
 
         PivotPoint = null;
         StatusMessage = "Rotation centre reset to model centre";
+    }
+
+    /// <summary>
+    /// Fits the wireframe box to the model and writes out its measurements.
+    /// </summary>
+    private void UpdateBoundingBox(MxBounds bounds)
+    {
+        if (bounds.IsEmpty)
+        {
+            BoundingBoxTransform = null;
+            BoundingBoxLabels = null;
+            DimensionsText = string.Empty;
+            return;
+        }
+
+        var size = bounds.Size;
+        var centre = bounds.Center;
+
+        // A model with no extent along one axis — a flat plate — would otherwise
+        // scale that axis to zero, which is a singular matrix. The floor is far
+        // below anything visible at print scale.
+        const double Flat = 1e-4;
+
+        var transform = new Transform3DGroup();
+        transform.Children.Add(new ScaleTransform3D(
+            Math.Max(size.X, Flat),
+            Math.Max(size.Y, Flat),
+            Math.Max(size.Z, Flat)));
+        transform.Children.Add(new TranslateTransform3D(centre.X, centre.Y, centre.Z));
+        transform.Freeze();
+
+        BoundingBoxTransform = transform;
+        BoundingBoxLabels = BuildDimensionLabels(bounds);
+        DimensionsText = $"{size.X:N1} × {size.Y:N1} × {size.Z:N1} mm";
+    }
+
+    /// <summary>
+    /// One measurement per axis, on the three edges that meet at the corner
+    /// closest to the default camera — which <see cref="FrameModel"/> places on
+    /// the low-X, low-Y, high-Z side, so all three read facing the viewer.
+    /// </summary>
+    private static BillboardText3D BuildDimensionLabels(MxBounds bounds)
+    {
+        var size = bounds.Size;
+        var centre = bounds.Center;
+        var min = bounds.Min;
+        var labels = new BillboardText3D();
+
+        // Nudged clear of the wire so the glyphs are not drawn over the line
+        // they are measuring.
+        var offset = MathF.Max(bounds.MaxExtent * 0.03f, 0.01f);
+
+        Add($"X {size.X:N1}", new System.Numerics.Vector3(centre.X, min.Y - offset, min.Z - offset));
+        Add($"Y {size.Y:N1}", new System.Numerics.Vector3(min.X - offset, centre.Y, min.Z - offset));
+        Add($"Z {size.Z:N1}", new System.Numerics.Vector3(min.X - offset, min.Y - offset, centre.Z));
+
+        return labels;
+
+        void Add(string text, System.Numerics.Vector3 origin) =>
+            labels.TextInfo.Add(new TextInfo(text, origin)
+            {
+                Foreground = new Color4(0.30f, 0.82f, 0.88f, 1f),
+                Scale = 0.5f,
+                HorizontalAlignment = BillboardHorizontalAlignment.Center,
+                VerticalAlignment = BillboardVerticalAlignment.Center,
+            });
+    }
+
+    /// <summary>
+    /// Cube of edge 1 centred on the origin, so a scale by the model's size and
+    /// a translate to its centre is all it takes to fit any model.
+    /// </summary>
+    private static LineGeometry3D BuildUnitBox()
+    {
+        var builder = new LineBuilder();
+        builder.AddBox(System.Numerics.Vector3.Zero, 1, 1, 1);
+        return builder.ToLineGeometry3D();
     }
 
     /// <summary>

@@ -117,13 +117,118 @@ public class ModelSearchIndexTests
         Assert.True(result.Elapsed < TimeSpan.FromSeconds(1), $"Search took {result.Elapsed.TotalMilliseconds:N1} ms");
     }
 
-    private static ModelFile File(long id, long rootId, string relativePath, long size = 100) => new()
+    [Theory]
+    [InlineData(ModelSortField.Size, false, new[] { 3L, 1L, 2L })]
+    [InlineData(ModelSortField.Size, true, new[] { 2L, 1L, 3L })]
+    [InlineData(ModelSortField.DateModified, false, new[] { 2L, 3L, 1L })]
+    [InlineData(ModelSortField.DateModified, true, new[] { 1L, 3L, 2L })]
+    [InlineData(ModelSortField.Name, false, new[] { 1L, 2L, 3L })]
+    [InlineData(ModelSortField.Name, true, new[] { 3L, 2L, 1L })]
+    public void OrdersEveryModelByTheRequestedField(
+        ModelSortField field,
+        bool descending,
+        long[] expected)
+    {
+        var search = new ModelSearchIndex(
+        [
+            File(1, 1, "alpha.stl", size: 200, modifiedTicks: 300),
+            File(2, 1, "bravo.stl", size: 300, modifiedTicks: 100),
+            File(3, 1, "charlie.stl", size: 100, modifiedTicks: 200),
+        ]);
+
+        var result = search.Search(new ModelSearchQuery(Sort: field, Descending: descending));
+
+        Assert.Equal(expected, result.Models.Select(model => model.Id));
+    }
+
+    [Fact]
+    public void SortingAppliesToFilteredResultsRatherThanTheWholeIndex()
+    {
+        var search = new ModelSearchIndex(
+        [
+            File(1, 1, "gear-small.stl", size: 100),
+            File(2, 1, "unrelated.stl", size: 900),
+            File(3, 1, "gear-large.stl", size: 500),
+            File(4, 1, "gear-medium.stl", size: 300),
+        ]);
+
+        var result = search.Search(new ModelSearchQuery(
+            "gear",
+            Sort: ModelSortField.Size,
+            Descending: true));
+
+        Assert.Equal([3L, 4L, 1L], result.Models.Select(model => model.Id));
+    }
+
+    [Fact]
+    public void GroupsByFormatAndByFolderWithinTheirRoot()
+    {
+        var search = new ModelSearchIndex(
+        [
+            File(1, 10, Path.Combine("b-parts", "cog.stl")),
+            File(2, 10, Path.Combine("a-parts", "hinge.3mf")),
+            File(3, 20, Path.Combine("a-parts", "clip.stl")),
+            File(4, 10, Path.Combine("a-parts", "bolt.stl")),
+        ]);
+
+        Assert.Equal(
+            [2L, 4L, 3L, 1L],
+            search.Search(new ModelSearchQuery(Sort: ModelSortField.Format)).Models.Select(m => m.Id));
+
+        // C:\models before D:\models, then a-parts before b-parts inside the first.
+        Assert.Equal(
+            [4L, 2L, 1L, 3L],
+            search.Search(new ModelSearchQuery(Sort: ModelSortField.Folder)).Models.Select(m => m.Id));
+    }
+
+    [Fact]
+    public void BreaksTiesByNameSoAnOrderIsNeverArbitrary()
+    {
+        var search = new ModelSearchIndex(
+        [
+            File(1, 1, "zulu.stl", size: 100),
+            File(2, 1, "alpha.stl", size: 100),
+            File(3, 1, "mike.stl", size: 100),
+        ]);
+
+        var result = search.Search(new ModelSearchQuery(Sort: ModelSortField.Size));
+
+        Assert.Equal([2L, 3L, 1L], result.Models.Select(model => model.Id));
+    }
+
+    [Fact]
+    public void ReusesOneOrderingAcrossRepeatedQueries()
+    {
+        var files = Enumerable.Range(0, 100_000)
+            .Select(i => File(i + 1, 1, $"part-{i:D6}.stl", size: (i * 7919) % 100_000))
+            .ToArray();
+        var search = new ModelSearchIndex(files);
+        var sort = new ModelSearchQuery(Sort: ModelSortField.Size, Descending: true);
+
+        // The first query builds the permutation; every later one only walks it,
+        // which is what keeps re-sorting off the keystroke path.
+        var first = search.Search(sort);
+        var second = search.Search(sort);
+
+        Assert.Equal(first.Models.Select(model => model.Id), second.Models.Select(model => model.Id));
+        Assert.True(
+            second.Elapsed < TimeSpan.FromMilliseconds(200),
+            $"Repeat sorted search took {second.Elapsed.TotalMilliseconds:N1} ms");
+        Assert.True(second.Models[0].Size >= second.Models[^1].Size);
+    }
+
+    private static ModelFile File(
+        long id,
+        long rootId,
+        string relativePath,
+        long size = 100,
+        long modifiedTicks = 1) => new()
     {
         Id = id,
         RootId = rootId,
         RootPath = rootId == 10 ? @"C:\models" : rootId == 20 ? @"D:\models" : @"C:\library",
         RelativePath = relativePath,
         Size = size,
-        ModifiedTicks = 1,
+        ModifiedTicks = modifiedTicks,
     };
 }

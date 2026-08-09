@@ -55,13 +55,32 @@ public sealed partial class LibraryViewModel : ObservableObject
             new("100 MB or larger", 100 * Megabyte, null),
         ];
 
+        // Direction is folded into the option rather than split out into a
+        // separate ascending/descending toggle. "Newest first" says what it does;
+        // "Date modified" plus an arrow somewhere else does not.
+        SortOptions =
+        [
+            new("Best match", ModelSortField.Relevance, false),
+            new("Name (A–Z)", ModelSortField.Name, false),
+            new("Name (Z–A)", ModelSortField.Name, true),
+            new("Newest first", ModelSortField.DateModified, true),
+            new("Oldest first", ModelSortField.DateModified, false),
+            new("Largest first", ModelSortField.Size, true),
+            new("Smallest first", ModelSortField.Size, false),
+            new("Format", ModelSortField.Format, false),
+            new("Folder", ModelSortField.Folder, false),
+        ];
+
         _selectedExtensionFilter = ExtensionFilters[0];
         _selectedSizeFilter = SizeFilters[0];
+        _selectedSort = SortOptions[0];
     }
 
     public IReadOnlyList<ExtensionFilterOption> ExtensionFilters { get; }
 
     public IReadOnlyList<SizeFilterOption> SizeFilters { get; }
+
+    public IReadOnlyList<SortOption> SortOptions { get; }
 
     /// <summary>
     /// The library as a folder hierarchy: one node per root, subfolders beneath.
@@ -90,6 +109,9 @@ public sealed partial class LibraryViewModel : ObservableObject
 
     [ObservableProperty]
     private SizeFilterOption _selectedSizeFilter = null!;
+
+    [ObservableProperty]
+    private SortOption _selectedSort = null!;
 
     [ObservableProperty]
     private string _searchText = string.Empty;
@@ -390,6 +412,8 @@ public sealed partial class LibraryViewModel : ObservableObject
 
     partial void OnSelectedSizeFilterChanged(SizeFilterOption value) => ScheduleSearch();
 
+    partial void OnSelectedSortChanged(SortOption value) => ScheduleSearch();
+
     partial void OnSelectedFolderChanged(FolderNode? value) => ScheduleSearch();
 
     /// <summary>Called by a node when the TreeView selects it.</summary>
@@ -527,7 +551,9 @@ public sealed partial class LibraryViewModel : ObservableObject
         SelectedSizeFilter.MinimumBytes,
         SelectedSizeFilter.MaximumBytesExclusive,
         SelectedFolder?.RootId,
-        SelectedFolder?.RelativePath);
+        SelectedFolder?.RelativePath,
+        SelectedSort.Field,
+        SelectedSort.Descending);
 
     private void CancelActiveSearch()
     {
@@ -717,3 +743,6 @@ public sealed record SizeFilterOption(
     string Label,
     long? MinimumBytes,
     long? MaximumBytesExclusive);
+
+/// <summary>One entry in the sort list: a field and the direction to read it in.</summary>
+public sealed record SortOption(string Label, ModelSortField Field, bool Descending);

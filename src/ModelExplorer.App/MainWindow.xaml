@@ -196,6 +196,44 @@
 
             <Border Grid.Column="0" Background="{StaticResource PanelBackgroundBrush}">
                 <DockPanel>
+                    <!-- Search metadata stays in the sidebar: it remains visible
+                         while the results pane is narrow and does not compete with
+                         the primary search box for header width.
+
+                         First in the pane, not last, because these are drop downs.
+                         Docked at the bottom the nine sort options would open past
+                         the bottom edge of the window and spill onto the desktop.
+                         It also puts the pane in reading order — search, refine,
+                         then browse — and leaves the LIBRARY header attached to
+                         the tree it labels. -->
+                    <Border DockPanel.Dock="Top"
+                            BorderBrush="{StaticResource PanelBorderBrush}"
+                            BorderThickness="0,0,0,1"
+                            Padding="12,4,12,12">
+                        <StackPanel>
+                            <TextBlock Text="SORT &amp; FILTERS"
+                                       Style="{StaticResource PanelHeaderStyle}"
+                                       Margin="0,6,0,6" />
+
+                            <ComboBox ItemsSource="{Binding Library.SortOptions}"
+                                      SelectedItem="{Binding Library.SelectedSort}"
+                                      DisplayMemberPath="Label"
+                                      Margin="0,0,0,8"
+                                      materialDesign:HintAssist.Hint="Sort by" />
+
+                            <ComboBox ItemsSource="{Binding Library.ExtensionFilters}"
+                                      SelectedItem="{Binding Library.SelectedExtensionFilter}"
+                                      DisplayMemberPath="Label"
+                                      Margin="0,0,0,8"
+                                      materialDesign:HintAssist.Hint="Format" />
+
+                            <ComboBox ItemsSource="{Binding Library.SizeFilters}"
+                                      SelectedItem="{Binding Library.SelectedSizeFilter}"
+                                      DisplayMemberPath="Label"
+                                      materialDesign:HintAssist.Hint="File size" />
+                        </StackPanel>
+                    </Border>
+
                     <Grid DockPanel.Dock="Top">
                         <TextBlock Text="LIBRARY" Style="{StaticResource PanelHeaderStyle}" />
                         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,2,6,0">
@@ -236,31 +274,6 @@
                                Margin="12,6,12,10"
                                TextWrapping="Wrap"
                                Text="{Binding Library.ModelCountText}" />
-
-                    <!-- Search metadata stays in the sidebar: it remains visible
-                         while the results pane is narrow and does not compete with
-                         the primary search box for header width. -->
-                    <Border DockPanel.Dock="Bottom"
-                            BorderBrush="{StaticResource PanelBorderBrush}"
-                            BorderThickness="0,1,0,0"
-                            Padding="12,8,12,4">
-                        <StackPanel>
-                            <TextBlock Text="FILTERS"
-                                       Style="{StaticResource PanelHeaderStyle}"
-                                       Margin="0,0,0,6" />
-
-                            <ComboBox ItemsSource="{Binding Library.ExtensionFilters}"
-                                      SelectedItem="{Binding Library.SelectedExtensionFilter}"
-                                      DisplayMemberPath="Label"
-                                      Margin="0,0,0,8"
-                                      materialDesign:HintAssist.Hint="Format" />
-
-                            <ComboBox ItemsSource="{Binding Library.SizeFilters}"
-                                      SelectedItem="{Binding Library.SelectedSizeFilter}"
-                                      DisplayMemberPath="Label"
-                                      materialDesign:HintAssist.Hint="File size" />
-                        </StackPanel>
-                    </Border>
 
                     <!-- The folder tree is also the roots list — the roots are its
                          top level. Selecting any node restricts the results to that
@@ -542,6 +555,12 @@
                         <MouseBinding Gesture="Shift+LeftClick" Command="hx:ViewportCommands.Pan" />
                         <MouseBinding Gesture="Ctrl+LeftClick" Command="hx:ViewportCommands.Zoom" />
                         <KeyBinding Key="F" Command="hx:ViewportCommands.ZoomExtents" />
+
+                        <!-- Scoped to the viewport rather than the window: an
+                             unmodified letter binding at window level fires while
+                             the search box has focus, so typing "b" would toggle
+                             the box. -->
+                        <KeyBinding Key="B" Command="{Binding ToggleBoundingBoxCommand}" />
                     </hx:Viewport3DX.InputBindings>
 
                     <hx:AmbientLight3D Color="#FF303338" />
@@ -551,6 +570,24 @@
                     <hx:MeshGeometryModel3D Geometry="{Binding Mesh}"
                                             Material="{Binding ModelMaterial}" />
 
+                    <!-- Bounding box. Like the pivot marker, never hit-testable:
+                         it surrounds the model, so every right-click meant for
+                         the model would otherwise land on a face of the box. -->
+                    <hx:LineGeometryModel3D Geometry="{Binding BoundingBoxGeometry}"
+                                            Transform="{Binding BoundingBoxTransform}"
+                                            Color="#FF4DD0E1"
+                                            Thickness="1"
+                                            IsHitTestVisible="False"
+                                            Visibility="{Binding ShowBoundingBox, Converter={StaticResource BooleanToVisibilityConverter}}" />
+
+                    <!-- FixedSize keeps the measurements legible at any zoom;
+                         scaled with the scene they would be unreadable on a
+                         200 mm print and fill the viewport on a 5 mm one. -->
+                    <hx:BillboardTextModel3D Geometry="{Binding BoundingBoxLabels}"
+                                             FixedSize="True"
+                                             IsHitTestVisible="False"
+                                             Visibility="{Binding ShowBoundingBox, Converter={StaticResource BooleanToVisibilityConverter}}" />
+
                     <!-- Pivot marker. Never hit-testable, or right-clicking it
                          would pick the marker instead of the model behind it. -->
                     <hx:MeshGeometryModel3D Geometry="{Binding PivotMarker}"
@@ -559,6 +596,28 @@
                                             IsHitTestVisible="False"
                                             Visibility="{Binding HasPivot, Converter={StaticResource BooleanToVisibilityConverter}}" />
                 </hx:Viewport3DX>
+
+                <!-- Viewport tools. Overlaid at top-left because they act on what
+                     is in the viewport, and because Helix puts the ViewCube in
+                     the opposite corner. -->
+                <Border HorizontalAlignment="Left" VerticalAlignment="Top"
+                        Margin="12"
+                        Padding="3"
+                        CornerRadius="4"
+                        Background="#CC202020"
+                        BorderBrush="{StaticResource PanelBorderBrush}"
+                        BorderThickness="1"
+                        Visibility="{Binding HasModel, Converter={StaticResource BooleanToVisibilityConverter}}">
+                    <ToggleButton Style="{StaticResource MaterialDesignActionToggleButton}"
+                                  Width="26" Height="26"
+                                  ToolTip="Show the model's bounding box and its dimensions (B)"
+                                  IsChecked="{Binding ShowBoundingBox}">
+                        <materialDesign:PackIcon Kind="CubeOutline" Width="15" Height="15" />
+                        <materialDesign:ToggleButtonAssist.OnContent>
+                            <materialDesign:PackIcon Kind="CubeScan" Width="15" Height="15" />
+                        </materialDesign:ToggleButtonAssist.OnContent>
+                    </ToggleButton>
+                </Border>
 
                 <!-- Empty state, hidden as soon as geometry exists -->
                 <TextBlock Style="{StaticResource PlaceholderStyle}"
@@ -674,6 +733,9 @@
                         </Button>
                     </StackPanel>
 
+                    <TextBlock Text="{Binding DimensionsText}" Style="{StaticResource StatusTextStyle}" />
+                    <TextBlock Text="  ·  " Style="{StaticResource StatusTextStyle}"
+                               Visibility="{Binding DimensionsText, Converter={StaticResource NonEmptyToVisibilityConverter}}" />
                     <TextBlock Text="{Binding TriangleCountText}" Style="{StaticResource StatusTextStyle}" />
                     <TextBlock Text="  ·  " Style="{StaticResource StatusTextStyle}"
                                Visibility="{Binding TimingText, Converter={StaticResource NonEmptyToVisibilityConverter}}" />

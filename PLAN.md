@@ -108,6 +108,32 @@ HelixToolkit 3.1.2 turns out to have no windowless offscreen render path — `Re
 
 > **Gate:** Clear the thumbnail cache and scroll fast through 10k+ models. Scrolling stays smooth while thumbnails fill in, and the ones under your cursor render before off-screen ones. Restart the app — thumbnails appear instantly from cache.
 
+### Step 6.5 — Result ordering and bounding box
+
+Interim work, slotted in after gate 6 passed.
+
+**Sorting.** Best match, name, date, size, format and folder, each with its
+direction folded into the option ("Newest first", not "Date modified" plus an
+arrow somewhere else). Ordering never touches the keystroke path: `ModelSearchIndex`
+builds one permutation per field, lazily and once per snapshot, and a query walks
+it — forwards or backwards — keeping the matches. Sorting 100k results per
+keystroke would have blown the 16 ms budget on its own.
+
+The sort and filter drop-downs moved to the top of the sidebar. Docked at the
+bottom, a nine-item list opened past the bottom edge of the window and spilled
+onto the desktop.
+
+**Bounding box.** A toggleable wireframe box around the model with its X/Y/Z
+extents labelled on the three edges meeting at the corner nearest the camera, and
+the dimensions in the status bar whether the box is shown or not — the number a
+print is most often checked against. One unit cube placed by a scale and a
+translate, like the pivot marker, rather than new line geometry per model. Toggle
+in a viewport overlay or `B` while the viewport has focus.
+
+> **Gate:** Sort a full library by each field and confirm the order and that the
+> results keep pace with typing. Toggle the box on a model whose bounds you know
+> — the labels must match what your slicer reports.
+
 ### Step 7 — Incremental rescan and live updates
 
 Diff by (size, mtime) — unchanged files are never reparsed. `FileSystemWatcher` per local root with debounce and event coalescing; timed polling fallback for network roots. Deletions removed from index, thumbnails invalidated on change.

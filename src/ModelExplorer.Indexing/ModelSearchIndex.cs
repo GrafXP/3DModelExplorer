@@ -14,6 +14,11 @@ namespace ModelExplorer.Indexing;
 /// The entries are sorted once when the snapshot is built. A query only assigns
 /// one of four ranks and walks that already-sorted array into rank buckets, so a
 /// broad query does not pay for sorting tens of thousands of hits every time.
+///
+/// Every other sort order works the same way: a permutation of the entries is
+/// built once per field, then a query walks it and keeps the matches. Sorting is
+/// therefore never on the keystroke path — only the first query that asks for a
+/// given order pays for it, and it pays once per snapshot.
 /// </remarks>
 public sealed class ModelSearchIndex
 {
@@ -23,9 +28,19 @@ public sealed class ModelSearchIndex
     private const byte NameContains = 3;
     private const byte PathContains = 4;
 
+    private static readonly int SortFieldCount = Enum.GetValues<ModelSortField>().Length;
+
     private readonly ModelFile[] _models;
     private readonly string[] _haystacks;
     private readonly int[] _nameLengths;
+
+    /// <summary>
+    /// One lazily built permutation per <see cref="ModelSortField"/>, indexed by
+    /// the enum value. Null means "not built yet"; the array itself never grows,
+    /// so publishing a slot with a single interlocked write is enough to make it
+    /// safe for the concurrent searches a fast typist produces.
+    /// </summary>
+    private readonly int[]?[] _orders = new int[]?[SortFieldCount];
 
     public ModelSearchIndex(IReadOnlyList<ModelFile> models)
     {
@@ -64,8 +79,10 @@ public sealed class ModelSearchIndex
     public IReadOnlyList<ModelFile> AllModels => _models;
 
     /// <summary>
-    /// Applies text and metadata filters, returning exact name matches first,
-    /// then name prefixes, name contains, and finally path-only matches.
+    /// Applies text and metadata filters and returns the survivors in the order
+    /// the query asked for. Under <see cref="ModelSortField.Relevance"/> that is
+    /// exact name matches first, then name prefixes, name contains, and finally
+    /// path-only matches.
     /// </summary>
     public ModelSearchResult Search(ModelSearchQuery query, CancellationToken cancellationToken = default)
     {
@@ -73,9 +90,16 @@ public sealed class ModelSearchIndex
         cancellationToken.ThrowIfCancellationRequested();
 
         var prepared = PreparedQuery.Create(query);
+
+        // Relevance needs something to be relevant to. With no search text every
+        // entry would rank the same, so it degrades to the name order the
+        // snapshot is already stored in.
+        var byRank = prepared.Sort == ModelSortField.Relevance && prepared.Terms.Length > 0;
+        var order = byRank ? null : OrderFor(prepared.Sort);
+
         if (prepared.IsEmpty)
         {
-            return new ModelSearchResult(_models, stopwatch.Elapsed);
+            return new ModelSearchResult(Arrange(order, prepared.Descending), stopwatch.Elapsed);
         }
 
         var ranks = new byte[_models.Length];
@@ -109,22 +133,165 @@ public sealed class ModelSearchIndex
         }
 
         var results = new ModelFile[matchCount];
-        Span<int> offsets = stackalloc int[PathContains + 1];
-        offsets.Clear();
-        offsets[NamePrefix] = counts[ExactName];
-        offsets[NameContains] = offsets[NamePrefix] + counts[NamePrefix];
-        offsets[PathContains] = offsets[NameContains] + counts[NameContains];
 
-        for (var i = 0; i < ranks.Length; i++)
+        if (byRank)
         {
-            var rank = ranks[i];
-            if (rank != NoMatch)
+            Span<int> offsets = stackalloc int[PathContains + 1];
+            offsets.Clear();
+            offsets[NamePrefix] = counts[ExactName];
+            offsets[NameContains] = offsets[NamePrefix] + counts[NamePrefix];
+            offsets[PathContains] = offsets[NameContains] + counts[NameContains];
+
+            for (var i = 0; i < ranks.Length; i++)
             {
-                results[offsets[rank]++] = _models[i];
+                var rank = ranks[i];
+                if (rank != NoMatch)
+                {
+                    results[offsets[rank]++] = _models[i];
+                }
             }
+        }
+        else
+        {
+            Gather(order, ranks, prepared.Descending, results);
         }
 
         return new ModelSearchResult(results, stopwatch.Elapsed);
+    }
+
+    /// <summary>
+    /// Copies the matched entries out in the order of <paramref name="order"/>,
+    /// which is null when the entries are already in the requested order.
+    /// </summary>
+    private void Gather(int[]? order, byte[] ranks, bool descending, ModelFile[] results)
+    {
+        var written = 0;
+
+        for (var k = 0; k < ranks.Length; k++)
+        {
+            // A descending sort walks the permutation backwards rather than
+            // reversing the results afterwards.
+            var slot = descending ? ranks.Length - 1 - k : k;
+            var entry = order is null ? slot : order[slot];
+
+            if (ranks[entry] != NoMatch)
+            {
+                results[written++] = _models[entry];
+            }
+        }
+    }
+
+    /// <summary>
+    /// The whole snapshot in the requested order, for a query with nothing to
+    /// filter on. Ascending name order is how the entries are stored, so the
+    /// common case of an empty search box hands back the shared array untouched.
+    /// </summary>
+    private IReadOnlyList<ModelFile> Arrange(int[]? order, bool descending)
+    {
+        if (order is null && !descending)
+        {
+            return _models;
+        }
+
+        var arranged = new ModelFile[_models.Length];
+        for (var k = 0; k < arranged.Length; k++)
+        {
+            var slot = descending ? arranged.Length - 1 - k : k;
+            arranged[k] = _models[order is null ? slot : order[slot]];
+        }
+
+        return arranged;
+    }
+
+    /// <summary>
+    /// The permutation putting the entries in <paramref name="field"/> order, or
+    /// null when they are already in it.
+    /// </summary>
+    /// <remarks>
+    /// Built on the first query that asks for the field and kept for the life of
+    /// the snapshot. Two searches racing to build the same order both succeed and
+    /// produce identical arrays, so the loser simply discards its own.
+    /// </remarks>
+    private int[]? OrderFor(ModelSortField field)
+    {
+        // The entries are stored in name order, so name — and relevance with
+        // nothing to rank — need no permutation at all.
+        if (field is ModelSortField.Relevance or ModelSortField.Name)
+        {
+            return null;
+        }
+
+        var slot = (int)field;
+        if (Volatile.Read(ref _orders[slot]) is { } cached)
+        {
+            return cached;
+        }
+
+        var built = BuildOrder(field);
+        return Interlocked.CompareExchange(ref _orders[slot], built, null) ?? built;
+    }
+
+    private int[] BuildOrder(ModelSortField field)
+    {
+        var order = new int[_models.Length];
+        for (var i = 0; i < order.Length; i++)
+        {
+            order[i] = i;
+        }
+
+        // The entry index is the tiebreak, and the entries are already in name
+        // order, so equal keys stay alphabetical without needing a stable sort.
+        Array.Sort(order, (a, b) =>
+        {
+            var byKey = CompareKeys(field, a, b);
+            return byKey != 0 ? byKey : a.CompareTo(b);
+        });
+
+        return order;
+    }
+
+    private int CompareKeys(ModelSortField field, int a, int b) => field switch
+    {
+        ModelSortField.DateModified => _models[a].ModifiedTicks.CompareTo(_models[b].ModifiedTicks),
+        ModelSortField.Size => _models[a].Size.CompareTo(_models[b].Size),
+        ModelSortField.Format => ExtensionOf(a).CompareTo(ExtensionOf(b), StringComparison.Ordinal),
+        ModelSortField.Folder => CompareFolders(a, b),
+        _ => 0,
+    };
+
+    /// <summary>
+    /// Roots first, then the folder below them, so the files of one project land
+    /// together even when two roots contain a folder of the same name.
+    /// </summary>
+    private int CompareFolders(int a, int b)
+    {
+        var byRoot = string.Compare(
+            _models[a].RootPath,
+            _models[b].RootPath,
+            StringComparison.OrdinalIgnoreCase);
+
+        return byRoot != 0
+            ? byRoot
+            : FolderOf(a).CompareTo(FolderOf(b), StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The extension, read straight off the lowercased haystack. Sort keys are
+    /// compared O(n log n) times, so none of them may allocate.
+    /// </summary>
+    private ReadOnlySpan<char> ExtensionOf(int index)
+    {
+        var name = _haystacks[index].AsSpan(0, _nameLengths[index]);
+        var dot = name.LastIndexOf('.');
+        return dot < 0 ? default : name[dot..];
+    }
+
+    /// <summary>The folder part of the relative path, likewise allocation-free.</summary>
+    private ReadOnlySpan<char> FolderOf(int index)
+    {
+        var path = _haystacks[index].AsSpan(_nameLengths[index] + 1);
+        var separator = path.LastIndexOfAny('\\', '/');
+        return separator < 0 ? default : path[..separator];
     }
 
     private void SearchRange(
@@ -273,8 +440,14 @@ public sealed class ModelSearchIndex
         long? MinimumSize,
         long? MaximumSizeExclusive,
         long? RootId,
-        string? FolderRelativePath)
+        string? FolderRelativePath,
+        ModelSortField Sort,
+        bool Descending)
     {
+        /// <summary>
+        /// Nothing to filter on, so every entry survives. Sort is deliberately
+        /// not part of this: an order still has to be applied to all of them.
+        /// </summary>
         public bool IsEmpty =>
             Terms.Length == 0 &&
             Extension is null &&
@@ -306,13 +479,44 @@ public sealed class ModelSearchIndex
                 query.MinimumSize,
                 query.MaximumSizeExclusive,
                 query.RootId,
-                folder);
+                folder,
+                query.Sort,
+                query.Descending);
         }
     }
 }
 
+/// <summary>
+/// What the results are ordered by.
+/// </summary>
+/// <remarks>
+/// Every field here is answerable from the index alone. Genuinely
+/// geometry-derived orders — triangle count, printed volume, whether a model
+/// fits a given bed — need the file parsed, which the index deliberately never
+/// does during a scan.
+/// </remarks>
+public enum ModelSortField
+{
+    /// <summary>Search rank, falling back to name when there is no search text.</summary>
+    Relevance,
+    Name,
+    DateModified,
+    Size,
+
+    /// <summary>File extension, so one format is grouped together.</summary>
+    Format,
+
+    /// <summary>Containing folder, so the parts of one project stay adjacent.</summary>
+    Folder,
+}
+
 /// <param name="MaximumSizeExclusive">
 /// Exclusive upper bound, so adjacent UI ranges meet without overlapping.
+/// </param>
+/// <param name="Descending">
+/// Reverses <paramref name="Sort" />. Ignored under
+/// <see cref="ModelSortField.Relevance" /> with search text, where the ordering
+/// is by rank and "least relevant first" is not a thing anyone wants.
 /// </param>
 public readonly record struct ModelSearchQuery(
     string? Text = null,
@@ -320,7 +524,9 @@ public readonly record struct ModelSearchQuery(
     long? MinimumSize = null,
     long? MaximumSizeExclusive = null,
     long? RootId = null,
-    string? FolderRelativePath = null);
+    string? FolderRelativePath = null,
+    ModelSortField Sort = ModelSortField.Relevance,
+    bool Descending = false);
 
 public readonly record struct ModelSearchResult(
     IReadOnlyList<ModelFile> Models,
