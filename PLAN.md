@@ -141,13 +141,27 @@ outline turns red on an overrun. Toggle in the viewport overlay or `P` while the
 viewport has focus. When visible, the plate contributes to the far clip plane so
 a large bed is not sliced away behind a small model.
 
+**Solid cutting plane.** One plane, freely rotatable around all three local axes
+and movable along its normal. While a handle is moving, HelixToolkit's shader
+cross-section supplies an immediate preview; after release, a cancellable CPU
+pass clips the original triangle mesh, welds the intersection segments into
+contours, tessellates concave sections and nested holes, and appends real cap
+triangles with a hard plane normal. Every change starts again from the untouched
+source mesh, so moving or flipping the plane is reversible and never compounds
+rounding errors. Open or non-manifold input is clipped but explicitly reported
+when a contour cannot be capped. Toggle in the viewport overlay or `C`; adjacent
+buttons flip the retained side and reset the plane.
+
 > **Gate:** Sort a full library by each field and confirm the order and that the
 > results keep pace with typing. Toggle the box on a model whose bounds you know
 > — the labels must match what your slicer reports. Load a model you know exceeds
 > the selected printer and confirm the plate outline turns red and the status bar
 > names the right axes and amounts. Switch printers with that model loaded, then
 > load a 10–20 mm model and confirm the far edge of the bed remains visible. `P`
-> must toggle the plate only while the viewport has focus.
+> must toggle the plate only while the viewport has focus. Enable the cutting
+> plane, rotate and translate it, and confirm the camera does not move with the
+> handle. The orange preview must resolve to “Solid cut”, with a visible flat cap;
+> flip sides and reset, then disable it and confirm the untouched model returns.
 
 ### Step 7 — Incremental rescan and live updates
 

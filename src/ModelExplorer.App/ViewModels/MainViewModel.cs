@@ -19,6 +19,9 @@ using ModelExplorer.Indexing;
 using HxCamera = HelixToolkit.Wpf.SharpDX.PerspectiveCamera;
 using HxMesh = HelixToolkit.SharpDX.MeshGeometry3D;
 using MxBounds = ModelExplorer.Geometry.BoundingBox;
+using MediaColor = System.Windows.Media.Color;
+using NumericsPlane = System.Numerics.Plane;
+using NumericsVector3 = System.Numerics.Vector3;
 
 namespace ModelExplorer.App.ViewModels;
 
@@ -38,8 +41,25 @@ public sealed partial class MainViewModel : ObservableObject
     /// </summary>
     private static readonly TimeSpan BusyIndicatorDelay = TimeSpan.FromMilliseconds(180);
 
+    /// <summary>
+    /// Prevents a CPU cut from starting for every mouse-move event. Helix shows
+    /// an immediate shader preview while the handle moves; the real mesh is
+    /// rebuilt once the transform has been still for this long.
+    /// </summary>
+    private static readonly TimeSpan CutDebounce = TimeSpan.FromMilliseconds(180);
+
     private readonly GeometryLoaderRegistry _loaders = GeometryLoaderRegistry.CreateDefault();
     private readonly GeometryLoadScheduler _loads;
+    private CancellationTokenSource? _cutCancellation;
+    private MeshData? _sourceMeshData;
+    private int _cutGeneration;
+    private int _sourceTriangleCount;
+    private string _sourceTimingText = string.Empty;
+    private bool _keepPositiveCutSide = true;
+    private bool _isConfiguringCutPlane;
+    private NumericsVector3 _orbitLightBaseDirection;
+    private double _lightOrbitAngle;
+    private TimeSpan? _lastLightFrame;
 
     /// <summary>
     /// Incremented on every accepted request. The scheduler already guarantees
@@ -67,6 +87,8 @@ public sealed partial class MainViewModel : ObservableObject
         Thumbnails = new ThumbnailService(_loaders, new ThumbnailCache(ThumbnailCache.DefaultDirectory));
         Library = new LibraryViewModel(_loaders.SupportedExtensions, Thumbnails);
         BuildPlateGeometry(SelectedBuildPlate);
+        ApplyLightingPreset(SelectedLightingPreset);
+        ApplyModelAppearance();
 
         // The library knows nothing about the viewer; the viewer follows it. That
         // keeps the scan/search state machine free of any rendering concern and
@@ -111,6 +133,171 @@ public sealed partial class MainViewModel : ObservableObject
         SpecularShininess = 24f,
         AmbientColor = new Color4(0.10f, 0.11f, 0.13f, 1f),
     };
+
+    /// <summary>Whether the viewport's compact lighting/material panel is open.</summary>
+    [ObservableProperty]
+    private bool _showAppearanceOptions;
+
+    [RelayCommand]
+    private void ToggleAppearanceOptions() => ShowAppearanceOptions = !ShowAppearanceOptions;
+
+    public IReadOnlyList<LightingPreset> LightingOptions { get; } = LightingPresets.All;
+
+    [ObservableProperty]
+    private LightingPreset _selectedLightingPreset = LightingPresets.Default;
+
+    /// <summary>
+    /// Ambient light is independent of the directional rig so a user can lift
+    /// shadowed faces without flattening the chosen key/fill arrangement.
+    /// </summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(AmbientLightColor))]
+    private bool _ambientLightEnabled = true;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(AmbientLightColor))]
+    private double _ambientLightIntensity = 0.42;
+
+    public MediaColor AmbientLightColor => AmbientLightEnabled
+        ? ScaleColor(236, 241, 250, AmbientLightIntensity)
+        : MediaColor.FromRgb(0, 0, 0);
+
+    [ObservableProperty]
+    private Vector3D _mainLightDirection;
+
+    [ObservableProperty]
+    private Vector3D _fillLightDirection;
+
+    [ObservableProperty]
+    private Vector3D _rimLightDirection;
+
+    [ObservableProperty]
+    private MediaColor _mainLightColor;
+
+    [ObservableProperty]
+    private MediaColor _fillLightColor;
+
+    [ObservableProperty]
+    private MediaColor _rimLightColor;
+
+    [ObservableProperty]
+    private bool _mainLightEnabled = true;
+
+    [ObservableProperty]
+    private bool _fillLightEnabled = true;
+
+    [ObservableProperty]
+    private bool _rimLightEnabled = true;
+
+    /// <summary>Continuously orbits the main directional light around world Z.</summary>
+    [ObservableProperty]
+    private bool _autoRotateLight;
+
+    [ObservableProperty]
+    private double _lightRotationSpeed = 35;
+
+    public IReadOnlyList<ShadingOption> ShadingOptions { get; } = global::ModelExplorer.App.ShadingOptions.All;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ModelFillMode))]
+    [NotifyPropertyChangedFor(nameof(RenderModelEdges))]
+    private ShadingOption _selectedShading = global::ModelExplorer.App.ShadingOptions.Default;
+
+    public global::SharpDX.Direct3D11.FillMode ModelFillMode => SelectedShading.FillMode;
+
+    public bool RenderModelEdges => SelectedShading.RenderEdges;
+
+    public IReadOnlyList<ModelColorOption> ModelColorOptions { get; } = ModelColors.All;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ModelWireframeColor))]
+    private ModelColorOption _selectedModelColor = ModelColors.Default;
+
+    /// <summary>Brightened material colour so edges remain legible on the dark viewport.</summary>
+    public MediaColor ModelWireframeColor => MediaColor.FromRgb(
+        Brighten(SelectedModelColor.Red),
+        Brighten(SelectedModelColor.Green),
+        Brighten(SelectedModelColor.Blue));
+
+    partial void OnSelectedLightingPresetChanged(LightingPreset value) => ApplyLightingPreset(value);
+
+    partial void OnAutoRotateLightChanged(bool value)
+    {
+        _lastLightFrame = null;
+        _lightOrbitAngle = 0;
+        MainLightDirection = ToVector3D(_orbitLightBaseDirection);
+    }
+
+    partial void OnSelectedShadingChanged(ShadingOption value) => ApplyModelAppearance();
+
+    partial void OnSelectedModelColorChanged(ModelColorOption value) => ApplyModelAppearance();
+
+    private void ApplyLightingPreset(LightingPreset preset)
+    {
+        _orbitLightBaseDirection = preset.Main.Direction;
+        _lightOrbitAngle = 0;
+        _lastLightFrame = null;
+
+        MainLightDirection = ToVector3D(preset.Main.Direction);
+        FillLightDirection = ToVector3D(preset.Fill.Direction);
+        RimLightDirection = ToVector3D(preset.Rim.Direction);
+        MainLightColor = ToMediaColor(preset.Main);
+        FillLightColor = ToMediaColor(preset.Fill);
+        RimLightColor = ToMediaColor(preset.Rim);
+    }
+
+    /// <summary>
+    /// Advances the orbit from WPF's render clock. Frame time, rather than a UI
+    /// timer, keeps rotation smooth without asking Helix to redraw while hidden.
+    /// </summary>
+    public void UpdateRotatingLight(TimeSpan renderingTime)
+    {
+        if (!AutoRotateLight)
+        {
+            return;
+        }
+
+        if (_lastLightFrame is { } previous)
+        {
+            // A debugger pause must not turn into a large, disorienting jump.
+            var elapsedSeconds = Math.Clamp((renderingTime - previous).TotalSeconds, 0, 0.1);
+            _lightOrbitAngle += elapsedSeconds * LightRotationSpeed * Math.PI / 180;
+            _lightOrbitAngle %= Math.Tau;
+            MainLightDirection = ToVector3D(
+                LightingPresets.OrbitDirection(_orbitLightBaseDirection, _lightOrbitAngle));
+        }
+
+        _lastLightFrame = renderingTime;
+    }
+
+    private void ApplyModelAppearance()
+    {
+        var colour = SelectedModelColor;
+        var red = colour.Red / 255f;
+        var green = colour.Green / 255f;
+        var blue = colour.Blue / 255f;
+        var specular = SelectedShading.SpecularStrength;
+
+        ModelMaterial.DiffuseColor = new Color4(red, green, blue, 1f);
+        ModelMaterial.AmbientColor = new Color4(red * 0.34f, green * 0.34f, blue * 0.34f, 1f);
+        ModelMaterial.SpecularColor = new Color4(specular, specular, specular, 1f);
+        ModelMaterial.SpecularShininess = SelectedShading.Shininess;
+        ModelMaterial.EnableFlatShading = SelectedShading.FlatShading;
+    }
+
+    private static Vector3D ToVector3D(NumericsVector3 value) =>
+        new(value.X, value.Y, value.Z);
+
+    private static MediaColor ToMediaColor(DirectionalLightOption light) =>
+        ScaleColor(light.Red, light.Green, light.Blue, light.Strength);
+
+    private static MediaColor ScaleColor(byte red, byte green, byte blue, double strength) =>
+        MediaColor.FromRgb(
+            (byte)Math.Clamp(Math.Round(red * strength), 0, 255),
+            (byte)Math.Clamp(Math.Round(green * strength), 0, 255),
+            (byte)Math.Clamp(Math.Round(blue * strength), 0, 255));
+
+    private static byte Brighten(byte channel) => (byte)(128 + channel / 2);
 
     /// <summary>Emissive so the pivot stays legible even on an unlit face.</summary>
     public PhongMaterial PivotMaterial { get; } = new()
@@ -297,9 +484,134 @@ public sealed partial class MainViewModel : ObservableObject
         UpdateClipPlanes();
     }
 
+    /// <summary>
+    /// One freely oriented cutting plane. While it moves, <see cref="OriginalMesh"/>
+    /// is clipped by Helix on the GPU; at rest, <see cref="Mesh"/> is replaced by
+    /// a genuinely cut and capped triangle mesh.
+    /// </summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowsCommittedModel))]
+    [NotifyPropertyChangedFor(nameof(ShowsCutPreview))]
+    private bool _showCutPlane;
+
+    /// <summary>The untouched renderer copy used for preview and restoration.</summary>
+    [ObservableProperty]
+    private HxMesh? _originalMesh;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowsCommittedModel))]
+    [NotifyPropertyChangedFor(nameof(ShowsCutPreview))]
+    private bool _isCutPreview;
+
+    [ObservableProperty]
+    private bool _isCutting;
+
+    /// <summary>The effective plane, already flipped to point at the retained half.</summary>
+    [ObservableProperty]
+    private NumericsPlane _cutPlane = new(NumericsVector3.UnitZ, 0);
+
+    /// <summary>
+    /// Rigid local-to-world transform for a plane authored in local XY with +Z
+    /// as its normal. Helix's manipulator writes this binding directly.
+    /// </summary>
+    [ObservableProperty]
+    private Transform3D _cutPlaneTransform = Transform3D.Identity;
+
+    [ObservableProperty]
+    private HxMesh? _cutPlaneSurface;
+
+    [ObservableProperty]
+    private LineGeometry3D? _cutPlaneOutline;
+
+    [ObservableProperty]
+    private double _cutPlaneManipulatorDiameter = 1;
+
+    [ObservableProperty]
+    private double _cutPlaneHandleDiameter = 0.1;
+
+    [ObservableProperty]
+    private string _cutPlaneStatusText = string.Empty;
+
+    public bool ShowsCutPreview => HasModel && ShowCutPlane && IsCutPreview;
+
+    public bool ShowsCommittedModel => HasModel && !ShowsCutPreview;
+
+    public PhongMaterial CutPlaneMaterial { get; } = new()
+    {
+        DiffuseColor = new Color4(1f, 0.52f, 0.16f, 0.12f),
+        EmissiveColor = new Color4(0.18f, 0.07f, 0.01f, 0.08f),
+        SpecularColor = new Color4(0f, 0f, 0f, 1f),
+    };
+
+    [RelayCommand]
+    private void ToggleCutPlane() => ShowCutPlane = !ShowCutPlane;
+
+    [RelayCommand]
+    private void FlipCutSide()
+    {
+        if (_sourceMeshData is null)
+        {
+            return;
+        }
+
+        _keepPositiveCutSide = !_keepPositiveCutSide;
+        UpdateCutPlaneFromTransform();
+        QueueCut(TimeSpan.Zero);
+    }
+
+    [RelayCommand]
+    private void ResetCutPlane()
+    {
+        if (_sourceMeshData is null)
+        {
+            return;
+        }
+
+        _keepPositiveCutSide = true;
+        SetCutPlaneTransform(_sourceMeshData.Bounds);
+        UpdateCutPlaneFromTransform();
+        QueueCut(TimeSpan.Zero);
+    }
+
+    partial void OnShowCutPlaneChanged(bool value)
+    {
+        if (_sourceMeshData is null || OriginalMesh is null)
+        {
+            IsCutPreview = false;
+            IsCutting = false;
+            CutPlaneStatusText = string.Empty;
+            return;
+        }
+
+        if (value)
+        {
+            QueueCut(TimeSpan.Zero);
+            return;
+        }
+
+        CancelCutWork();
+        IsCutPreview = false;
+        Mesh = OriginalMesh;
+        ApplyBounds(_sourceMeshData.Bounds);
+        TriangleCountText = $"{_sourceTriangleCount:N0} triangles";
+        TimingText = _sourceTimingText;
+        CutPlaneStatusText = string.Empty;
+    }
+
+    partial void OnCutPlaneTransformChanged(Transform3D value)
+    {
+        UpdateCutPlaneFromTransform();
+        if (!_isConfiguringCutPlane && ShowCutPlane)
+        {
+            QueueCut(CutDebounce);
+        }
+    }
+
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasModel))]
     [NotifyPropertyChangedFor(nameof(ShowEmptyState))]
+    [NotifyPropertyChangedFor(nameof(ShowsCommittedModel))]
+    [NotifyPropertyChangedFor(nameof(ShowsCutPreview))]
     private HxMesh? _mesh;
 
     public bool HasModel => Mesh is not null;
@@ -370,6 +682,7 @@ public sealed partial class MainViewModel : ObservableObject
         }
 
         var generation = ++_generation;
+        CancelCutWork();
 
         CurrentPath = path;
         ModelName = Path.GetFileName(path);
@@ -471,17 +784,27 @@ public sealed partial class MainViewModel : ObservableObject
         // it also re-frames what the marker's scale is derived from.
         PivotPoint = null;
 
+        _sourceMeshData = mesh;
+        _sourceTriangleCount = triangles;
+        _sourceTimingText = $"parse {parseTime.TotalMilliseconds:N0} ms · build {buildMs:N0} ms";
+        OriginalMesh = geometry;
         Mesh = geometry;
+        ConfigureCutPlane(bounds);
         FrameModel(bounds);
         ApplyBounds(bounds);
 
         TriangleCountText = $"{triangles:N0} triangles";
-        TimingText = $"parse {parseTime.TotalMilliseconds:N0} ms · build {buildMs:N0} ms";
+        TimingText = _sourceTimingText;
 
         // Dimensions used to be appended here; they have their own status-bar
         // slot now, kept in step with the bounding box, so repeating them would
         // just be the same numbers twice on one line.
         StatusMessage = triangles == 0 ? $"{ModelName} contains no geometry" : ModelName;
+
+        if (ShowCutPlane && triangles > 0)
+        {
+            QueueCut(TimeSpan.Zero);
+        }
     }
 
     /// <summary>
@@ -491,7 +814,16 @@ public sealed partial class MainViewModel : ObservableObject
     /// </summary>
     private void ShowFailure(string? message)
     {
+        CancelCutWork();
+        _sourceMeshData = null;
+        _sourceTriangleCount = 0;
+        _sourceTimingText = string.Empty;
+        OriginalMesh = null;
         Mesh = null;
+        CutPlaneSurface = null;
+        CutPlaneOutline = null;
+        CutPlaneStatusText = string.Empty;
+        IsCutPreview = false;
         PivotPoint = null;
         ApplyBounds(MxBounds.Empty);
         HasError = true;
@@ -617,6 +949,215 @@ public sealed partial class MainViewModel : ObservableObject
 
         Camera.NearPlaneDistance = near;
         Camera.FarPlaneDistance = far;
+    }
+
+    /// <summary>
+    /// Switches to the zero-latency GPU preview before a manipulator starts
+    /// changing the plane transform.
+    /// </summary>
+    public void BeginCutPlaneManipulation()
+    {
+        if (!ShowCutPlane || _sourceMeshData is null)
+        {
+            return;
+        }
+
+        CancelCutWork();
+        IsCutPreview = true;
+        CutPlaneStatusText = "Previewing cut…";
+    }
+
+    /// <summary>Commits a real capped mesh immediately when the handle is released.</summary>
+    public void EndCutPlaneManipulation()
+    {
+        if (ShowCutPlane)
+        {
+            QueueCut(TimeSpan.Zero);
+        }
+    }
+
+    /// <summary>Stops a pending CPU cut when the window closes.</summary>
+    public void StopCutPlaneWork() => CancelCutWork();
+
+    private void ConfigureCutPlane(MxBounds bounds)
+    {
+        if (bounds.IsEmpty)
+        {
+            CutPlaneSurface = null;
+            CutPlaneOutline = null;
+            return;
+        }
+
+        var side = MathF.Max(bounds.Size.Length() * 1.15f, 0.1f);
+        CutPlaneSurface = BuildCutPlaneSurface(side);
+        CutPlaneOutline = BuildCutPlaneOutline(side);
+        CutPlaneManipulatorDiameter = Math.Max(bounds.MaxExtent * 0.38, 0.1);
+        CutPlaneHandleDiameter = Math.Max(bounds.MaxExtent * 0.012, 0.05);
+
+        _isConfiguringCutPlane = true;
+        try
+        {
+            _keepPositiveCutSide = true;
+            SetCutPlaneTransform(bounds);
+            UpdateCutPlaneFromTransform();
+        }
+        finally
+        {
+            _isConfiguringCutPlane = false;
+        }
+    }
+
+    private void SetCutPlaneTransform(MxBounds bounds)
+    {
+        var centre = bounds.Center;
+        var transform = new TranslateTransform3D(centre.X, centre.Y, centre.Z);
+        transform.Freeze();
+        CutPlaneTransform = transform;
+    }
+
+    private void UpdateCutPlaneFromTransform()
+    {
+        var matrix = CutPlaneTransform.Value;
+        var origin = matrix.Transform(new Point3D(0, 0, 0));
+        var transformedNormal = matrix.Transform(new Vector3D(0, 0, 1));
+        if (transformedNormal.LengthSquared <= double.Epsilon)
+        {
+            return;
+        }
+
+        transformedNormal.Normalize();
+        var normal = new NumericsVector3(
+            (float)transformedNormal.X,
+            (float)transformedNormal.Y,
+            (float)transformedNormal.Z);
+        var d = -((normal.X * (float)origin.X) +
+                  (normal.Y * (float)origin.Y) +
+                  (normal.Z * (float)origin.Z));
+
+        var plane = new NumericsPlane(normal, d);
+        CutPlane = _keepPositiveCutSide
+            ? plane
+            : new NumericsPlane(-plane.Normal, -plane.D);
+    }
+
+    private void QueueCut(TimeSpan delay)
+    {
+        if (!ShowCutPlane || _sourceMeshData is null || OriginalMesh is null)
+        {
+            return;
+        }
+
+        var generation = ++_cutGeneration;
+        var cancellation = new CancellationTokenSource();
+        var previous = Interlocked.Exchange(ref _cutCancellation, cancellation);
+        previous?.Cancel();
+
+        IsCutPreview = true;
+        IsCutting = true;
+        CutPlaneStatusText = delay > TimeSpan.Zero ? "Previewing cut…" : "Building solid cut…";
+        _ = ApplyCutAsync(
+            _sourceMeshData,
+            CutPlane,
+            generation,
+            delay,
+            cancellation);
+    }
+
+    private async Task ApplyCutAsync(
+        MeshData source,
+        NumericsPlane plane,
+        int generation,
+        TimeSpan delay,
+        CancellationTokenSource cancellation)
+    {
+        try
+        {
+            if (delay > TimeSpan.Zero)
+            {
+                await Task.Delay(delay, cancellation.Token);
+            }
+
+            var stopwatch = Stopwatch.StartNew();
+            var (result, geometry) = await Task.Run(() =>
+            {
+                var cut = MeshPlaneCutter.CutAndCap(source, plane, cancellation.Token);
+                cancellation.Token.ThrowIfCancellationRequested();
+                return (cut, BuildGeometry(cut.Mesh));
+            }, cancellation.Token);
+            stopwatch.Stop();
+
+            if (generation != _cutGeneration || !ShowCutPlane)
+            {
+                return;
+            }
+
+            Mesh = geometry;
+            IsCutPreview = false;
+            ApplyBounds(result.Mesh.Bounds);
+            TriangleCountText = $"{result.Mesh.TriangleCount:N0} triangles after cut";
+            TimingText = $"{_sourceTimingText} · cut {stopwatch.Elapsed.TotalMilliseconds:N0} ms";
+
+            if (result.Mesh.TriangleCount == 0)
+            {
+                CutPlaneStatusText = "The retained side contains no geometry";
+            }
+            else if (result.OpenContourCount > 0)
+            {
+                CutPlaneStatusText = result.OpenContourCount == 1
+                    ? "Cut is open — 1 contour could not be capped"
+                    : $"Cut is open — {result.OpenContourCount:N0} contours could not be capped";
+            }
+            else if (result.ClosedContourCount == 0)
+            {
+                CutPlaneStatusText = "The plane does not intersect the model";
+            }
+            else
+            {
+                var sections = result.ClosedContourCount == 1
+                    ? "1 section capped"
+                    : $"{result.ClosedContourCount:N0} sections capped";
+                CutPlaneStatusText = $"Solid cut · {sections}";
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // The plane moved again or another model was selected. The newer
+            // generation owns every visible state update.
+        }
+        catch (Exception ex)
+        {
+            if (generation == _cutGeneration && ShowCutPlane && OriginalMesh is not null)
+            {
+                Mesh = OriginalMesh;
+                IsCutPreview = false;
+                if (_sourceMeshData is not null)
+                {
+                    ApplyBounds(_sourceMeshData.Bounds);
+                }
+
+                TriangleCountText = $"{_sourceTriangleCount:N0} triangles";
+                TimingText = _sourceTimingText;
+                CutPlaneStatusText = $"Could not create a solid cut — {ex.Message}";
+            }
+        }
+        finally
+        {
+            if (generation == _cutGeneration)
+            {
+                Interlocked.CompareExchange(ref _cutCancellation, null, cancellation);
+                IsCutting = false;
+            }
+
+            cancellation.Dispose();
+        }
+    }
+
+    private void CancelCutWork()
+    {
+        _cutGeneration++;
+        var cancellation = Interlocked.Exchange(ref _cutCancellation, null);
+        cancellation?.Cancel();
+        IsCutting = false;
     }
 
     /// <summary>
@@ -768,6 +1309,38 @@ public sealed partial class MainViewModel : ObservableObject
         PlateSurface = BuildPlateSurface(plate);
         PlateGrid = BuildPlateGrid(plate, step: 10f, skip: 50f);
         PlateOutline = BuildPlateOutline(plate, step: 50f);
+    }
+
+    private static HxMesh BuildCutPlaneSurface(float side)
+    {
+        var half = side * 0.5f;
+        var normal = NumericsVector3.UnitZ;
+        var mesh = new HxMesh
+        {
+            Positions =
+            [
+                new(-half, -half, 0), new(half, -half, 0),
+                new(half, half, 0), new(-half, half, 0),
+            ],
+            Normals = [normal, normal, normal, normal],
+            Indices = [0, 1, 2, 0, 2, 3],
+        };
+
+        mesh.UpdateBounds();
+        return mesh;
+    }
+
+    private static LineGeometry3D BuildCutPlaneOutline(float side)
+    {
+        var half = side * 0.5f;
+        var builder = new LineBuilder();
+        builder.AddLine(new(-half, -half, 0), new(half, -half, 0));
+        builder.AddLine(new(half, -half, 0), new(half, half, 0));
+        builder.AddLine(new(half, half, 0), new(-half, half, 0));
+        builder.AddLine(new(-half, half, 0), new(-half, -half, 0));
+        builder.AddLine(new(-half, 0, 0), new(half, 0, 0));
+        builder.AddLine(new(0, -half, 0), new(0, half, 0));
+        return builder.ToLineGeometry3D();
     }
 
     private static HxMesh BuildPlateSurface(BuildPlate plate)
