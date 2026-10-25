@@ -22,6 +22,7 @@ GetDpiForWindow
 GetDpiForSystem
 SetProcessDpiAwarenessContext
 SetCapture
+GetCapture
 ReleaseCapture
 GetCursorPos
 ScreenToClient

@@ -29,6 +29,7 @@ internal sealed unsafe partial class MainWindow
     private PaneRect _viewRect;
     private PaneRect[] _panes = [];
     private DragKind _drag;
+    private MouseButton _dragButton;
     private int _dragPane = -1;
     private int _mouseX, _mouseY, _downX, _downY;
     private bool _rightDown;
@@ -215,6 +216,7 @@ internal sealed unsafe partial class MainWindow
         }
 
         _dragPane = pane;
+        _dragButton = button;
         switch (button)
         {
             case MouseButton.Left:
@@ -228,11 +230,22 @@ internal sealed unsafe partial class MainWindow
                 break;
         }
 
-        PInvoke.SetCapture(_hwnd);
+        // ImGui's backend has usually taken the capture already, on the same
+        // message; taking it again would only make Windows report a change.
+        if (PInvoke.GetCapture() != _hwnd)
+        {
+            PInvoke.SetCapture(_hwnd);
+        }
+
         Invalidate();
     }
 
-    private void OnMouseMove(int x, int y)
+    /// <param name="buttons">
+    /// The MK_* flags of the message: which buttons are down now. A drag whose
+    /// button was let go somewhere this window never heard of ends here. Null when
+    /// not known (the test hook).
+    /// </param>
+    private void OnMouseMove(int x, int y, nuint? buttons = null)
     {
         var dx = x - _mouseX;
         var dy = y - _mouseY;
@@ -240,6 +253,18 @@ internal sealed unsafe partial class MainWindow
         _mouseY = y;
         if (_drag == DragKind.None || _dragPane < 0 || _dragPane >= _panes.Length)
         {
+            return;
+        }
+
+        var held = _dragButton == MouseButton.Middle ? 0x0010u : 0x0001u; // MK_MBUTTON, MK_LBUTTON
+        if (buttons is { } down && (down & held) == 0)
+        {
+            EndDrag();
+            if (PInvoke.GetCapture() == _hwnd)
+            {
+                PInvoke.ReleaseCapture();
+            }
+
             return;
         }
 

@@ -609,7 +609,7 @@ internal sealed unsafe partial class MainWindow
                 return default;
 
             case PInvoke.WM_MOUSEMOVE:
-                OnMouseMove(LowWord(lParam.Value), HighWord(lParam.Value));
+                OnMouseMove(LowWord(lParam.Value), HighWord(lParam.Value), wParam.Value);
                 return default;
             case PInvoke.WM_LBUTTONDOWN:
                 OnMouseDown(MouseButton.Left, LowWord(lParam.Value), HighWord(lParam.Value), (wParam.Value & 0x0004) != 0, (wParam.Value & 0x0008) != 0);
@@ -638,8 +638,19 @@ internal sealed unsafe partial class MainWindow
             }
 
             case PInvoke.WM_CAPTURECHANGED:
-                EndDrag();
+            {
+                // lParam is the window taking the capture. Only another window
+                // taking it ends a drag: Windows reports a change even when this
+                // window takes it again, and ImGui's backend releases it on button
+                // up before the button-up handler below has run.
+                var gaining = new HWND((void*)lParam.Value);
+                if (!gaining.IsNull && gaining != hwnd)
+                {
+                    EndDrag();
+                }
+
                 return default;
+            }
 
             case PInvoke.WM_KEYDOWN:
             case PInvoke.WM_SYSKEYDOWN when wParam.Value == (nuint)VIRTUAL_KEY.VK_F10:
