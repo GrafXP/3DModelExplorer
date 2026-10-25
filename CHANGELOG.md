@@ -2,6 +2,16 @@
 
 All notable changes to 3D Model Explorer are documented here. The project follows [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- Independent one-, two-, and four-model viewer layouts, multi-file opening, and a library visibility toggle.
+- Linked rotation, panning, zoom, fitting, and picked orbit pivots across visible panes.
+- A synchronized third pane whose default comparison overlays A/B in two colors with independent opacity sliders and optional bounding-box center alignment.
+- An optional bidirectional deviation heatmap with adjustable tolerance, calculated only when explicitly activated.
+- Background comparison with cancellation and automatic invalidation/recalculation when source models change.
+
 ## [1.0.0] - 2026-08-09
 
 ### Added

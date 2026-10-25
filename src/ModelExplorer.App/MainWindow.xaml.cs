@@ -1,27 +1,22 @@
 using System.ComponentModel;
-using System.IO;
 using System.Runtime.InteropServices;
 using System.Windows;
-using System.Windows.Input;
+using System.Windows.Controls;
 using System.Windows.Interop;
 using System.Windows.Media;
-using System.Windows.Threading;
-using HelixToolkit.Wpf.SharpDX;
+using ModelExplorer.App.Controls;
 using ModelExplorer.App.ViewModels;
 
 namespace ModelExplorer.App;
 
-/// <summary>
-/// Interaction logic for MainWindow.xaml.
-/// </summary>
 public partial class MainWindow : Window
 {
-    // Win10 20H1 and later. Earlier builds used 19 for the same attribute.
     private const int DwmwaUseImmersiveDarkMode = 20;
     private const int DwmwaUseImmersiveDarkModeLegacy = 19;
-    private bool _isCutPlanePointerDown;
-    private bool _wasViewportInertiaEnabled;
-    private bool _isRotatingLightSubscribed;
+    private readonly Dictionary<ModelViewModel, ModelViewer> _viewers = [];
+    private GridLength _rootsWidth = new(240);
+    private GridLength _resultsWidth = new(360);
+    private MainViewModel ViewModel => (MainViewModel)DataContext;
 
     [DllImport("dwmapi.dll", PreserveSig = true)]
     private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int size);
@@ -29,102 +24,63 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
-
+        ViewModel.PropertyChanged += OnWorkspaceChanged;
         Loaded += OnWindowLoaded;
-
-        // Clip planes track the camera, so they have to be recomputed on every
-        // camera change rather than only when a model is loaded.
-        Viewport.CameraChanged += (_, _) => ViewModel?.UpdateClipPlanes();
-
-        if (ViewModel is { } viewModel)
-        {
-            viewModel.PropertyChanged += OnViewModelPropertyChanged;
-        }
-    }
-
-    private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
-    {
-        if (e.PropertyName == nameof(MainViewModel.PivotPoint))
-        {
-            SyncRotationPoint();
-        }
-        else if (e.PropertyName == nameof(MainViewModel.AutoRotateLight))
-        {
-            SyncRotatingLightSubscription();
-        }
-    }
-
-    private void SyncRotatingLightSubscription()
-    {
-        var shouldSubscribe = ViewModel?.AutoRotateLight == true;
-        if (shouldSubscribe == _isRotatingLightSubscribed)
-        {
-            return;
-        }
-
-        if (shouldSubscribe)
-        {
-            CompositionTarget.Rendering += OnRendering;
-        }
-        else
-        {
-            CompositionTarget.Rendering -= OnRendering;
-        }
-
-        _isRotatingLightSubscribed = shouldSubscribe;
+        CompositionTarget.Rendering += OnRendering;
+        ArrangeViewers();
     }
 
     private void OnRendering(object? sender, EventArgs e)
     {
-        if (e is RenderingEventArgs rendering)
+        if (e is RenderingEventArgs frame)
+            foreach (var pane in ViewModel.VisiblePanes) pane.UpdateRotatingLight(frame.RenderingTime);
+    }
+
+    private void OnWorkspaceChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(MainViewModel.VisiblePanes)) ArrangeViewers();
+        if (e.PropertyName == nameof(MainViewModel.ShowLibrary))
         {
-            ViewModel?.UpdateRotatingLight(rendering.RenderingTime);
+            var visible = ViewModel.ShowLibrary;
+            if (!visible) { _rootsWidth = RootsColumn.Width; _resultsWidth = ResultsColumn.Width; }
+            RootsColumn.MinWidth = visible ? 160 : 0;
+            ResultsColumn.MinWidth = visible ? 220 : 0;
+            RootsColumn.Width = visible ? _rootsWidth : new GridLength(0);
+            ResultsColumn.Width = visible ? _resultsWidth : new GridLength(0);
+            var body = (Grid)((FrameworkElement)ViewerGrid.Parent).Parent;
+            foreach (UIElement child in body.Children)
+                if (Grid.GetColumn(child) < 4) child.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
         }
     }
 
-    /// <summary>
-    /// Mirrors the view model's pivot onto the camera controller.
-    /// </summary>
-    /// <remarks>
-    /// The fixed rotation point lives on the viewport, not in the view model, and
-    /// nothing clears it on its own. Left alone it survives into the next model —
-    /// so loading a new one would orbit it around a point picked off the previous
-    /// one, which is usually not even inside the new geometry. Driving it from a
-    /// single view-model property means every reset path covers it.
-    /// </remarks>
-    private void SyncRotationPoint()
+    private void ArrangeViewers()
     {
-        if (ViewModel?.PivotPoint is { } point)
+        ViewerGrid.Children.Clear();
+        ViewerGrid.RowDefinitions.Clear();
+        ViewerGrid.ColumnDefinitions.Clear();
+        var panes = ViewModel.VisiblePanes;
+        var columns = panes.Count == 1 ? 1 : panes.Count == 3 ? 3 : 2;
+        for (var i = 0; i < columns; i++) ViewerGrid.ColumnDefinitions.Add(new ColumnDefinition());
+        for (var i = 0; i < (panes.Count + columns - 1) / columns; i++) ViewerGrid.RowDefinitions.Add(new RowDefinition());
+        for (var i = 0; i < panes.Count; i++)
         {
-            Viewport.FixedRotationPoint = point;
-            Viewport.FixedRotationPointEnabled = true;
-        }
-        else
-        {
-            Viewport.FixedRotationPointEnabled = false;
+            var pane = panes[i];
+            if (!_viewers.TryGetValue(pane, out var viewer))
+            {
+                viewer = new ModelViewer(ViewModel, pane);
+                _viewers.Add(pane, viewer);
+            }
+            Grid.SetColumn(viewer, i % columns);
+            Grid.SetRow(viewer, i / columns);
+            ViewerGrid.Children.Add(viewer);
         }
     }
 
     private async void OnWindowLoaded(object sender, RoutedEventArgs e)
     {
-        if (ViewModel is not { } viewModel)
-        {
-            return;
-        }
-
-        SyncRotatingLightSubscription();
-
-        // The index is opened and read after the window is up, so a slow disk
-        // delays the list rather than the first frame.
-        await viewModel.Library.InitializeAsync();
-
-        if (App.StartupFile is { } path)
-        {
-            await viewModel.LoadAsync(path);
-        }
+        await ViewModel.Library.InitializeAsync();
+        if (App.StartupFile is { } path) await ViewModel.LoadAsync(path);
     }
-
-    private MainViewModel? ViewModel => DataContext as MainViewModel;
 
     protected override void OnSourceInitialized(EventArgs e)
     {
@@ -132,155 +88,29 @@ public partial class MainWindow : Window
         ApplyDarkTitleBar();
     }
 
-    /// <summary>
-    /// Stops the thumbnail workers. They are background threads and would not
-    /// hold the process open, but one in the middle of a large parse would keep
-    /// reading a file for seconds after the window is gone.
-    /// </summary>
     protected override void OnClosed(EventArgs e)
     {
-        if (_isRotatingLightSubscribed)
-        {
-            CompositionTarget.Rendering -= OnRendering;
-            _isRotatingLightSubscribed = false;
-        }
-
-        if (ViewModel is { } viewModel)
-        {
-            viewModel.PropertyChanged -= OnViewModelPropertyChanged;
-            viewModel.StopCutPlaneWork();
-            viewModel.Thumbnails.Dispose();
-        }
-
+        CompositionTarget.Rendering -= OnRendering;
+        ViewModel.PropertyChanged -= OnWorkspaceChanged;
+        ViewModel.StopWork();
+        foreach (var viewer in _viewers.Values) viewer.Detach();
+        ViewModel.Dispose();
         base.OnClosed(e);
-    }
-
-    private void OnViewportPreviewLeftButtonDown(object sender, MouseButtonEventArgs e)
-    {
-        if (ViewModel is not { ShowCutPlane: true } viewModel)
-        {
-            return;
-        }
-
-        var hits = Viewport.FindHits(e.GetPosition(Viewport));
-        if (!hits.Any(hit => hit.IsValid && hit.ModelHit is UIManipulator3D))
-        {
-            return;
-        }
-
-        // This preview event runs before the viewport's LeftClick rotate command.
-        // The 3D handle still receives the unhandled event, while the camera
-        // controller sees rotation disabled for the duration of the drag.
-        _isCutPlanePointerDown = true;
-        _wasViewportInertiaEnabled = Viewport.IsInertiaEnabled;
-        Viewport.StopSpin();
-        Viewport.IsInertiaEnabled = false;
-        Viewport.IsRotationEnabled = false;
-        viewModel.BeginCutPlaneManipulation();
-    }
-
-    private void OnViewportPreviewLeftButtonUp(object sender, MouseButtonEventArgs e)
-    {
-        if (!_isCutPlanePointerDown)
-        {
-            return;
-        }
-
-        _isCutPlanePointerDown = false;
-        ViewModel?.EndCutPlaneManipulation();
-        Viewport.StopSpin();
-
-        // Keep the camera disabled through the bubbling MouseUp event; restoring
-        // it in this preview handler lets the rotate command turn the handle's
-        // drag velocity into camera inertia after release.
-        Dispatcher.BeginInvoke(new Action(() =>
-        {
-            Viewport.IsRotationEnabled = true;
-            Viewport.IsInertiaEnabled = _wasViewportInertiaEnabled;
-            Viewport.StopSpin();
-        }), DispatcherPriority.Background);
-    }
-
-    /// <summary>
-    /// Right-click picks a point on the model and makes it the orbit centre.
-    /// Right-clicking empty space clears it, returning the pivot to the model
-    /// centre. Without this, orbiting a large print always swings around its
-    /// bounding-box centre, which is useless when inspecting one corner of it.
-    /// </summary>
-    private void OnViewportRightButtonDown(object sender, MouseButtonEventArgs e)
-    {
-        if (ViewModel is not { } viewModel)
-        {
-            return;
-        }
-
-        var hits = Viewport.FindHits(e.GetPosition(Viewport));
-
-        // FindHits returns front-to-back, but sort defensively rather than
-        // trusting the order — picking the far side of a model would be worse
-        // than a marginally slower right-click.
-        var nearest = hits
-            .Where(h => h.IsValid &&
-                        (ReferenceEquals(h.ModelHit, CommittedModel) ||
-                         ReferenceEquals(h.ModelHit, CutPreviewModel)))
-            .OrderBy(h => h.Distance)
-            .FirstOrDefault();
-
-        // Only the view model is touched; SyncRotationPoint carries the change
-        // through to the viewport.
-        if (nearest is null)
-        {
-            viewModel.ClearPivot();
-        }
-        else
-        {
-            var p = nearest.PointHit;
-            viewModel.SetPivot(p.X, p.Y, p.Z);
-        }
-
-        e.Handled = true;
     }
 
     private void OnDragOver(object sender, DragEventArgs e)
     {
-        e.Effects = TryGetDroppedModel(e) is not null ? DragDropEffects.Copy : DragDropEffects.None;
+        e.Effects = e.Data.GetData(DataFormats.FileDrop) is string[] paths && paths.Any(ViewModel.IsSupported)
+            ? DragDropEffects.Copy : DragDropEffects.None;
         e.Handled = true;
     }
 
     private async void OnFileDropped(object sender, DragEventArgs e)
     {
-        if (TryGetDroppedModel(e) is { } path && ViewModel is { } viewModel)
-        {
-            e.Handled = true;
-            await viewModel.LoadAsync(path);
-        }
+        e.Handled = true;
+        if (e.Data.GetData(DataFormats.FileDrop) is string[] paths) await ViewModel.LoadFilesAsync(paths);
     }
 
-    /// <summary>
-    /// Accepts whatever the loader registry accepts, so a format added to the
-    /// registry works here without a second list to keep in step.
-    /// </summary>
-    private string? TryGetDroppedModel(DragEventArgs e)
-    {
-        if (ViewModel is not { } viewModel || !e.Data.GetDataPresent(DataFormats.FileDrop))
-        {
-            return null;
-        }
-
-        if (e.Data.GetData(DataFormats.FileDrop) is not string[] paths)
-        {
-            return null;
-        }
-
-        return paths.FirstOrDefault(viewModel.IsSupported);
-    }
-
-    /// <summary>
-    /// Opts the non-client area into dark mode. WPF does not do this on its own,
-    /// so without it the window keeps a light title bar over a dark client area.
-    /// Applied during SourceInitialized — before the window is shown — so there
-    /// is no visible light-to-dark flash on startup.
-    /// </summary>
     private void ApplyDarkTitleBar()
     {
         var hwnd = new WindowInteropHelper(this).Handle;
