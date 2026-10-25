@@ -1,6 +1,5 @@
 using System.Numerics;
-using ModelExplorer.App;
-using SharpDX.Direct3D11;
+using ModelExplorer.Core.Viewing;
 
 namespace ModelExplorer.Tests;
 
@@ -47,8 +46,33 @@ public class SceneAppearanceTests
     {
         Assert.Contains(ShadingOptions.All, option => option.FlatShading);
         Assert.Contains(ShadingOptions.All, option => option.RenderEdges);
-        Assert.Contains(ShadingOptions.All, option => option.FillMode == FillMode.Wireframe);
-        Assert.Contains(ShadingOptions.All, option => option.FillMode == FillMode.Solid);
+        Assert.Contains(ShadingOptions.All, option => option.Wireframe);
+        Assert.Contains(ShadingOptions.All, option => !option.Wireframe);
+    }
+
+    [Fact]
+    public void OrbitingLightAdvancesByFrameTimeAndIgnoresLongPauses()
+    {
+        var appearance = new Appearance { RotateMainLight = true, RotationSpeed = 90 };
+
+        appearance.Advance(TimeSpan.FromSeconds(0.05));
+        Assert.Equal(Math.PI / 2 * 0.05, appearance.LightAngle, 6);
+
+        // A debugger pause or a hidden window must not turn into a jump.
+        appearance.Advance(TimeSpan.FromSeconds(30));
+        Assert.Equal(Math.PI / 2 * 0.15, appearance.LightAngle, 6);
+
+        appearance.Lighting = LightingPresets.All[1];
+        Assert.Equal(0, appearance.LightAngle);
+    }
+
+    [Fact]
+    public void DisabledLightsContributeNothing()
+    {
+        var appearance = new Appearance { AmbientEnabled = false };
+
+        Assert.Equal(Vector3.Zero, appearance.AmbientColor);
+        Assert.Equal(appearance.Lighting.Main.Direction, appearance.MainDirection);
     }
 
     [Fact]

@@ -1,25 +1,55 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
+  <!-- A plain Win32 window, Direct3D 11 and Dear ImGui, compiled ahead of time
+       to native code: no UI framework to load and no JIT at start-up. -->
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <TargetFramework>net10.0-windows</TargetFramework>
-    <UseWPF>true</UseWPF>
-    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <TargetFramework>net10.0</TargetFramework>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <AssemblyName>ModelExplorer</AssemblyName>
     <RootNamespace>ModelExplorer.App</RootNamespace>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+
+    <PublishAot>true</PublishAot>
+    <OptimizationPreference>Speed</OptimizationPreference>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <UseSystemResourceKeys>true</UseSystemResourceKeys>
+    <EventSourceSupport>false</EventSourceSupport>
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="HelixToolkit.Wpf.SharpDX" Version="3.1.2" />
-    <PackageReference Include="MaterialDesignThemes" Version="5.3.2" />
-    <PackageReference Include="MaterialDesignColors" Version="5.3.2" />
-    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
-    <PackageReference Include="VirtualizingWrapPanel" Version="2.5.4" />
+    <ProjectReference Include="..\ModelExplorer.Core\ModelExplorer.Core.csproj" />
+    <AssemblyAttribute Include="System.Runtime.Versioning.SupportedOSPlatformAttribute">
+      <_Parameter1>windows10.0.17763</_Parameter1>
+    </AssemblyAttribute>
+    <AssemblyAttribute Include="System.Runtime.CompilerServices.DisableRuntimeMarshallingAttribute" />
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\ModelExplorer.Geometry\ModelExplorer.Geometry.csproj" />
-    <ProjectReference Include="..\ModelExplorer.Indexing\ModelExplorer.Indexing.csproj" />
+    <PackageReference Include="Microsoft.Windows.CsWin32" Version="0.3.360" PrivateAssets="all" />
+    <PackageReference Include="Hexa.NET.ImGui" Version="2.2.9" />
+    <PackageReference Include="Hexa.NET.ImGui.Backends" Version="1.0.18" />
+    <PackageReference Include="Hexa.NET.ImGuizmo" Version="2.2.9" />
   </ItemGroup>
+
+  <!-- Bound through the import table instead of being looked up on first call. -->
+  <ItemGroup>
+    <DirectPInvoke Include="d3d11" />
+    <NativeLibrary Include="d3d11.lib" />
+    <DirectPInvoke Include="dwmapi" />
+    <NativeLibrary Include="dwmapi.lib" />
+  </ItemGroup>
+
+  <!-- The compiled shaders are checked in (Render\Shaders.g.cs), so building needs
+       nothing beyond the .NET SDK. Where the Windows SDK's fxc is installed, they
+       are compiled again whenever a shader source is newer. -->
+  <ItemGroup>
+    <ShaderSource Include="Shaders\*.hlsl;Shaders\*.hlsli;Shaders\build.ps1" />
+  </ItemGroup>
+  <Target Name="CompileShaders" BeforeTargets="CoreCompile" Inputs="@(ShaderSource)" Outputs="Render\Shaders.g.cs"
+          Condition="'$(OS)' == 'Windows_NT'">
+    <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildProjectDirectory)\Shaders\build.ps1&quot;" />
+  </Target>
 
 </Project>

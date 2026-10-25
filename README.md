@@ -12,71 +12,83 @@ Download the latest `3DModelExplorer-*-win-x64.zip` from [GitHub Releases](https
 2. Run `ModelExplorer.exe`.
 3. Add one or more folders containing STL or 3MF files.
 
-The release is self-contained, so a separate .NET installation is not required. The executable is not currently code-signed; Windows SmartScreen may show an unrecognized-app warning on first launch.
+The release is a native executable with four small native libraries beside it; no .NET installation is required. The executable is not currently code-signed; Windows SmartScreen may show an unrecognized-app warning on first launch.
 
 ## Requirements
 
 - Windows 10 or Windows 11, x64
-- A DirectX 11-capable graphics adapter
+- A DirectX 11-capable graphics adapter (without one, Windows' software rasterizer is used, slowly)
 - Enough memory for the models being viewed; very large meshes are loaded into memory
 
 ## Features
 
+- Opens in a fraction of a second: a native executable with a Direct3D 11 and Dear ImGui interface, drawing only when something changes
 - Fast recursive indexing of local folders and network shares
 - Binary and ASCII STL support
 - 3MF support, including build transforms, components, and unit conversion
 - Instant in-memory search with folder, format, size, and sorting controls
-- Virtualized list and thumbnail-grid views with a persistent thumbnail cache
-- DirectX 11 viewport with orbit, pan, zoom, ViewCube, coordinate axes, and FPS display
-- One-, two-, and four-model layouts with independent loading and linked rotation, pan, zoom, and surface pivots
-- Fast two-color mesh blending in a synchronized third pane, with independent opacity controls
-- Optional bidirectional surface-distance heatmap with adjustable tolerance and deviation measurements
-- Model dimensions, a toggleable bounding box, and printer build-plate presets
-- A freely rotatable cutting plane that creates a real capped surface for closed meshes
+- Thumbnail grid and details list that draw only what is in view, with a persistent thumbnail cache
+- Every selected model is shown at once, arranged automatically — no layout to pick
+- Recently viewed models stay in memory and the next model in the list is loaded ahead, so stepping through a library is instant
+- Linked rotation, pan, zoom and picked pivots across all panes, with optional bounding-box centre alignment
+- Overlay mode: all selected models in one pane, each in its own colour, with per-model opacity
+- Deviation mode: every model coloured by its surface distance from a chosen reference, with adjustable tolerance
+- Model dimensions, a toggleable bounding box, and printer build-plate presets with a fit check
+- One freely rotatable cutting plane, shared by all panes, that creates a real capped surface for closed meshes
 - Configurable ambient, main, fill, and rim lighting with an animated rotating light
-- Smooth, matte, flat, edge-overlay, and wireframe shading modes
-- Multiple model-color presets
+- Smooth, matte, flat, edge-overlay, and wireframe shading modes, and several model colours
+- Dockable panels; window, panels and view settings are remembered
 - Drag-and-drop, Open in Explorer, and Copy path workflows
 
-All model parsing, indexing, thumbnails, and search data stay on the local computer. The index and thumbnail cache are stored under `%LOCALAPPDATA%\ModelExplorer`.
+All model parsing, indexing, thumbnails, and search data stay on the local computer. The index, thumbnail cache, settings and panel layout are stored under `%LOCALAPPDATA%\ModelExplorer`.
 
-## Viewport controls
+## Controls
 
 | Action | Control |
 |---|---|
+| Show a model | Click it in the Models panel |
+| Show several models side by side | Ctrl+click or Shift+click; Ctrl+A selects every model in the list |
+| Step through the models | Arrow keys, Home, End (Shift extends the selection) |
 | Orbit | Left drag |
 | Pan | Middle drag or Shift + left drag |
-| Zoom | Mouse wheel or Ctrl + left drag |
+| Zoom at the cursor | Mouse wheel or Ctrl + left drag |
 | Set orbit pivot | Right-click a model surface |
 | Clear orbit pivot | Right-click empty space |
-| Fit model | `F` while the viewport is focused |
-| Toggle bounding box | `B` |
-| Toggle build plate | `P` |
-| Toggle cutting plane | `C` |
-| Open appearance panel | `A` |
-| Open a model directly | `Ctrl+O` |
+| Fit | `F`, or double-click a pane |
+| Look along an axis | Click an end of the axis triad in a pane's corner |
+| Make a pane the active one | Click it, or `1`–`9` |
+| Overlay / deviation heatmap | `O` / `H` (press again for side by side) |
+| Toggle bounding box, build plate, cutting plane | `B`, `P`, `C` |
+| Lighting and appearance | `A` |
+| Keep the view when models change | `L` |
+| Hide or show the panels | `Tab` |
+| Open models directly | `Ctrl+O`, or drop files on the window (with Ctrl: add them) |
+| Copy path, show in Explorer | `Ctrl+C`, `Ctrl+E` (the active model) |
+| Fullscreen | `F11` |
+| All keys | `F1` |
 
 ## Viewing and comparing models
 
-1. Choose **2 models** or **4 models** in the viewer's **Views** menu.
-2. Click a pane to make it active (blue border), then select a library model, use the pane's **Open** button, or drop an STL/3MF onto it. Double-click a library model or use **Open in active pane** in its context menu to open an already-selected item in another pane.
-3. **Open Model** / `Ctrl+O` also accepts multiple files and fills consecutive panes starting at the active pane, expanding the layout up to four panes. Models are retained when switching to a smaller layout. Toggle **Library** off for more viewing space.
-4. Leave **Sync cameras** checked to link rotation, pan, zoom, and picked pivots in every visible pane. **Fit all** (or `F` in a linked viewport) frames the models at a common scale. Uncheck synchronization to navigate independently.
-5. With models loaded in **A** and **B**, select **Compare A / B**. A third, linked view opens in the default **Blend meshes** mode. A is blue and B is orange; use the two opacity sliders to reveal overlaps and differences. This mode reuses the loaded GPU meshes and opens immediately.
-6. Select **Heatmap** in the comparison mode menu when you need measured surface deviation. The slower distance calculation starts only when this mode is activated. Closing comparison restores the selected two- or four-model layout, including models in C and D.
+Whatever is selected in the Models panel is shown. One selected model fills the view. Two or more get a pane each, arranged in the grid that shows them largest: two models side by side in a wide window, four in a 2 × 2 grid, up to sixteen at once. Files opened with `Ctrl+O`, dropped on the window, or named on the command line are shown the same way; dropping a folder adds it to the library.
 
-The heatmap checks both directions without requiring matching vertices or triangulation. **Heatmap on A/B** selects which surface to inspect, so additions and missing regions can be examined from either side. Green indicates a distance within the adjustable tolerance (default **0.1 mm**); yellow through red indicates increasing deviation. Both directions use the same color scale. The panel reports sampled maximum and mean distances in millimeters and the percentage of triangles whose samples are within tolerance.
+While the next model loads, the previous one stays on screen, so stepping through a library with the arrow keys never shows an empty view. The models just before and after the selected one are loaded ahead in the background.
 
-Comparison uses the original loaded meshes, independent of cutting-plane previews. Each triangle is sampled at its three vertices and face center, and its largest sampled distance controls its color. The reported maximum is an approximation, not an exact Hausdorff distance; small differences between samples can be missed. Mean distances are sample averages, and triangle percentages are not surface-area percentages. This is an unsigned surface comparison, not a solid subtraction or an inside/outside test.
+**Linked** cameras turn, pan and zoom every pane together, at a common scale, so the same side of each model is always compared. Uncheck it to navigate the panes independently. **Align centers** draws every model with its bounding-box centre at the origin, keeping scale and orientation; it does not rotate or best-fit models. **Keep view** keeps the camera when the selection changes instead of framing the new models.
 
-Files are compared in their original coordinates by default. **Align centers** removes the difference between their bounding-box centers for blending, viewing, and heatmap measurement, while retaining scale and orientation. It does not perform automatic rotation or best-fit registration. Replacing A or B refreshes the blend immediately and invalidates an old heatmap. Heatmap computation runs in the background and can be canceled or left by switching back to Blend meshes.
+**Overlay** draws every shown model in one pane, each in its own colour, see-through. The opacity sliders in the toolbar reveal overlaps and differences; the blending is order-independent, so no model hides another by being drawn last.
+
+**Deviation** colours every model by its distance from the active model's surface (blue frame); click another pane to measure against that one instead. With exactly two models, the reference is coloured too, by its distance from the other, so additions and missing regions show from both sides. Green is within the adjustable tolerance (default **0.1 mm**); yellow through red is increasing deviation up to the largest found, on one scale for all panes. Each pane reports its sampled maximum and mean distance and the share of triangles within tolerance. Changing the tolerance recolours instantly; measurements run in the background and are cancelled when leaving the mode.
+
+The comparison samples each triangle at its three vertices and face centre, and the largest sampled distance colours it. The reported maximum is an approximation, not an exact Hausdorff distance; small differences between samples can be missed. Mean distances are sample averages, and triangle percentages are not surface-area percentages. This is an unsigned surface comparison, not a solid subtraction or an inside/outside test. Deviation uses the original meshes; a cutting plane only hides part of them.
+
+The **cutting plane** applies to every pane, placed relative to each model's own centre, so it takes the same section through every variant being compared. Turn it with the rings of the handle in the active pane and move it with its arrow, or use the Cut plane window's axis buttons and offset slider. While the plane moves, the GPU shows a preview; once it is still, each model is replaced by a real capped mesh.
 
 ## Known limitations
 
 - Windows x64 only; there are no macOS or Linux builds.
-- STL and 3MF are the only supported model formats in version 1.0.0.
+- STL and 3MF are the only supported model formats. STEP and other CAD formats are being researched; see the [plan](PLAN.md).
 - Folder changes require a manual rescan; live filesystem watching is not implemented yet.
-- Cutting an open or non-manifold mesh may leave uncapped contours. The viewport reports when this happens.
+- Cutting an open or non-manifold mesh may leave uncapped contours. The pane reports when this happens.
 - The release is portable and unsigned; there is no installer or automatic updater.
 
 ## Building from source
@@ -90,7 +102,9 @@ dotnet test ModelExplorer.slnx
 dotnet run --project src/ModelExplorer.App
 ```
 
-To create the same self-contained ZIP used for GitHub Releases:
+The compiled shaders are checked in (`src/ModelExplorer.App/Render/Shaders.g.cs`). When the Windows SDK is installed, the build compiles them again whenever a file in `src/ModelExplorer.App/Shaders` changes.
+
+The release is compiled ahead of time to native code, which additionally needs the MSVC linker (Visual Studio or Build Tools with "Desktop development with C++"). To create the same ZIP used for GitHub Releases:
 
 ```powershell
 ./scripts/Publish-Release.ps1 -Version 1.0.0

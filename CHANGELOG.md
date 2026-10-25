@@ -4,13 +4,23 @@ All notable changes to 3D Model Explorer are documented here. The project follow
 
 ## [Unreleased]
 
+### Changed
+
+- The interface was rebuilt on a plain Win32 window, Direct3D 11 and Dear ImGui, compiled ahead of time to native code. The window appears in well under 100 ms and the library and first model in about half a second (previously more than a second for an empty window); an idle window uses no CPU.
+- The release is one native executable with four native libraries, a 7 MB download instead of 94 MB.
+- The selection decides what is shown: every selected model gets a pane, arranged automatically (up to sixteen). There is no layout to choose.
+- Panels dock and can be rearranged; the window, panels and view settings are remembered between runs.
+- Appearance, bounding box, build plate and the cutting plane apply to every pane. The cutting plane is placed relative to each model's centre, so it takes the same section through each.
+- The cutting plane's handle now turns about any axis and moves along the normal, with axis presets and an offset slider beside it.
+
 ### Added
 
-- Independent one-, two-, and four-model viewer layouts, multi-file opening, and a library visibility toggle.
-- Linked rotation, panning, zoom, fitting, and picked orbit pivots across visible panes.
-- A synchronized third pane whose default comparison overlays A/B in two colors with independent opacity sliders and optional bounding-box center alignment.
-- An optional bidirectional deviation heatmap with adjustable tolerance, calculated only when explicitly activated.
-- Background comparison with cancellation and automatic invalidation/recalculation when source models change.
+- Linked rotation, pan, zoom and picked pivots across all panes, with optional bounding-box centre alignment.
+- Overlay mode: every shown model in one pane, in its own colour, with per-model opacity and order-independent transparency.
+- Deviation mode: every model coloured by its sampled surface distance from the active model, with adjustable tolerance; with two models, both directions are shown. Changing the tolerance recolours without recomputing.
+- Recently viewed models stay in memory, and the models next to the selection are loaded ahead, so stepping through the library is instant. The previous model stays on screen until the next can be drawn.
+- Keyboard navigation through the results, a click on the axis triad to look along an axis, and a key overview (F1).
+- Ctrl+drop adds files to what is shown; a dropped folder is added to the library.
 
 ## [1.0.0] - 2026-08-09
 

@@ -1,5 +1,5 @@
 using System.Numerics;
-using ModelExplorer.App;
+using ModelExplorer.Core.Viewing;
 
 namespace ModelExplorer.Tests;
 

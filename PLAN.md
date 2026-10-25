@@ -194,6 +194,26 @@ Settings (roots, thumbnail size, cache location), keyboard shortcuts, remembered
 
 STEP support (`Ab4d.OpenCascade` for OCCT tessellation — needs ~200 MB of native OCCT binaries and a license file, which is exactly why it's not in the MVP), tags and collections, duplicate detection via content hash, measurement tools, cross-section, print-time estimate, G-code preview, OBJ/PLY.
 
+## Future research: STEP and other CAD formats
+
+A first look at [F3D](https://github.com/f3d-app/f3d) (BSD-3-Clause, v4.0.0 released 2026-10-20) as a source of STEP support. It was stopped early to focus on the ImGui UI. These are the findings so far:
+
+- **Formats.** STEP, IGES, BREP, XBF and FreeCAD files go through its `occt` plugin, which uses OpenCASCADE's XCAF readers (with colours and assembly names). Assimp covers FBX, COLLADA, OFF, DXF, `.x`, 3MF and AMF. glTF/GLB, OBJ, PLY and STL are native. The official Windows zip includes the OCCT plugin.
+- **It is a renderer, not a loader.** libf3d (`f3d.dll` is 85 MB, VTK/OpenGL, 188 MB unpacked) ships a C API (`f3d_c_api.dll`). The API can add files or meshes to *its own* scene, list the hierarchy and render to an image. No call hands triangles back. To use it, its OpenGL viewport would have to replace ours. That conflicts with the D3D11 renderer and the start-up budget.
+- **Speed (measured).** `f3d-console --output` timings, 800×600, cold process each run:
+
+  | File | Size | Time |
+  |---|---|---|
+  | OCCT sample `screw.step` | 0.1 MB | 1.3 s |
+  | OCCT sample `linkrods.step` | 1.7 MB | 1.1 s |
+  | `PLG 3 Assembly v15.step` | 8.0 MB | 4.7 s |
+  | `Gear Test.step` | 17.6 MB | 6.9 s |
+  | `Gridfinity Racksystem/Assembly Multi v6.step` | 30.7 MB | 27.6 s |
+
+  About 1 s is fixed cost (process start, VTK, OpenGL). The rest grows faster than file size. The time split between STEP parsing and tessellation was not measured.
+- **Likely direction.** Call OpenCASCADE directly, the same engine F3D uses, through a small native C shim (as FastImageViewer2 does with `fivcodecs.dll`). The shim would return triangles into `MeshData` behind a new `IGeometryLoader`. OCCT is LGPL-2.1 with an exception, so it has to be linked dynamically and its notices shipped. Tessellate in parallel (`BRepMesh_IncrementalMesh` with `isInParallel`), and cache the tessellated mesh on disk by content key, like thumbnails. That way a STEP file is slow only the first time. OBJ, PLY, OFF and glTF are simple enough for managed parsers. Assimp's C API is the fallback for the rest.
+- **Still open.** Where the STEP time goes (parse or mesh) and how much coarser deflection saves. Whether OCCT 8.0 parses faster than the build inside F3D. The size of a minimal OCCT DLL set. How to show a slow STEP load without blocking the library (progress, then a mesh cached for next time).
+
 ## Release documentation
 
 The public release workflow is documented in [docs/RELEASING.md](docs/RELEASING.md).

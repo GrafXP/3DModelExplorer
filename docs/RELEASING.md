@@ -1,6 +1,6 @@
 # Release process
 
-Releases use semantic versions and ship as a portable, self-contained Windows x64 ZIP.
+Releases use semantic versions and ship as a portable Windows x64 ZIP: one native executable and the native libraries it loads.
 
 ## Prepare
 
@@ -17,6 +17,8 @@ dotnet test ModelExplorer.slnx --configuration Release
 ```
 
 ## Package
+
+The release is compiled ahead of time to native code. Besides the .NET 10 SDK this needs the MSVC linker: Visual Studio or the Build Tools with the "Desktop development with C++" workload.
 
 ```powershell
 ./scripts/Publish-Release.ps1 -Version 1.0.0

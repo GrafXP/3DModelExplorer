@@ -1,6 +1,7 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/ModelExplorer.App/ModelExplorer.App.csproj" />
+    <Project Path="src/ModelExplorer.Core/ModelExplorer.Core.csproj" />
     <Project Path="src/ModelExplorer.Geometry/ModelExplorer.Geometry.csproj" />
     <Project Path="src/ModelExplorer.Indexing/ModelExplorer.Indexing.csproj" />
   </Folder>

@@ -32,10 +32,16 @@ if (Test-Path -LiteralPath $archivePath) {
     Remove-Item -LiteralPath $archivePath -Force
 }
 
+# The Native AOT toolchain finds the MSVC linker through vswhere, which the
+# Visual Studio installer puts here but not on PATH.
+$installer = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer'
+if ((Test-Path $installer) -and ($env:PATH -notlike "*$installer*")) {
+    $env:PATH += ";$installer"
+}
+
 dotnet publish $projectPath `
     --configuration Release `
     --runtime $Runtime `
-    --self-contained true `
     --property:PublishProfile=win-x64 `
     --property:Version=$Version `
     --output $packageDirectory
@@ -46,6 +52,8 @@ if ($LASTEXITCODE -ne 0) {
 
 # Project-reference PDBs can still be copied even when the application profile
 # disables its own symbols. Public release archives do not ship debug symbols.
+# What remains is the executable and the native libraries it loads: cimgui,
+# cimguizmo and ImGuiImpl (the UI), e_sqlite3 (the index).
 Get-ChildItem -LiteralPath $packageDirectory -Filter '*.pdb' -File -Recurse |
     Remove-Item -Force
 

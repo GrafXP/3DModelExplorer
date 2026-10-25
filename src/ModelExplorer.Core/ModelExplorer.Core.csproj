@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Everything the viewer decides that is not drawing: the library and its
+       search, which models are shown and how they are compared, the cameras,
+       the cut plane and the model cache. No window, GPU or UI library is
+       referenced, so all of it runs under the unit tests. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>ModelExplorer.Core</RootNamespace>
+    <IsAotCompatible>true</IsAotCompatible>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\ModelExplorer.Geometry\ModelExplorer.Geometry.csproj" />
+    <ProjectReference Include="..\ModelExplorer.Indexing\ModelExplorer.Indexing.csproj" />
+  </ItemGroup>
+
+</Project>
